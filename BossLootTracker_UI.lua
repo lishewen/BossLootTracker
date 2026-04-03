@@ -634,7 +634,6 @@ end
 
 -- Show the main window
 function UI.Show()
-    print("BLT Show called, MainFrame=" .. tostring(UI.MainFrame ~= nil) .. " shown=" .. tostring(UI.MainFrame and UI.MainFrame:IsShown()))
     if not UI.MainFrame then
         UI.Initialize()
     end
@@ -752,19 +751,12 @@ function UI.Initialize()
     DB = BossLootTrackerDB
 
     if not UI.MainFrame then
-        local ok, err = pcall(CreateMainFrame)
-        if not ok then print("BLT Error CreateMainFrame: " .. tostring(err)) end
-        ok, err = pcall(function() CreateFilters(UI.MainFrame) end)
-        if not ok then print("BLT Error CreateFilters: " .. tostring(err)) end
-        ok, err = pcall(function() CreateDataTable(UI.MainFrame) end)
-        if not ok then print("BLT Error CreateDataTable: " .. tostring(err)) end
-        ok, err = pcall(function() CreateActionButtons(UI.MainFrame) end)
-        if not ok then print("BLT Error CreateActionButtons: " .. tostring(err)) end
-        ok, err = pcall(CreateEditModeUI)
-        if not ok then print("BLT Error CreateEditModeUI: " .. tostring(err)) end
-        ok, err = pcall(CreateMinimapButton)
-        if not ok then print("BLT Error CreateMinimapButton: " .. tostring(err)) end
-        print("|cff00FF00[BossLootTracker]|r UI initialized, MainFrame=" .. tostring(UI.MainFrame ~= nil))
+        CreateMainFrame()
+        CreateFilters(UI.MainFrame)
+        CreateDataTable(UI.MainFrame)
+        CreateActionButtons(UI.MainFrame)
+        CreateEditModeUI()
+        CreateMinimapButton()
     end
 end
 

@@ -152,14 +152,39 @@ function Export.TableToJson(tbl)
     local function serialize(val)
         local t = type(val)
         if t == "table" then
-            local items = {}
-            for k, v in pairs(val) do
-                local key = type(k) == "string" and '"' .. k .. '"' or tostring(k)
-                table.insert(items, key .. ":" .. serialize(v))
+            -- Check if array-like
+            local isArray = true
+            local maxIndex = 0
+            for k, _ in pairs(val) do
+                if type(k) ~= "number" or k < 1 or math.floor(k) ~= k then
+                    isArray = false
+                    break
+                end
+                if k > maxIndex then maxIndex = k end
             end
-            return "{" .. table.concat(items, ",") .. "}"
+            if isArray and maxIndex == #val then
+                local items = {}
+                for i = 1, #val do
+                    table.insert(items, serialize(val[i]))
+                end
+                return "[" .. table.concat(items, ",") .. "]"
+            else
+                local items = {}
+                for k, v in pairs(val) do
+                    local key = type(k) == "string" and '"' .. k .. '"' or tostring(k)
+                    table.insert(items, key .. ":" .. serialize(v))
+                end
+                return "{" .. table.concat(items, ",") .. "}"
+            end
         elseif t == "string" then
-            return '"' .. val:gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n') .. '"'
+            -- Escape special chars including WoW color pipe characters
+            local s = val
+            s = s:gsub('\\', '\\\\\\')
+            s = s:gsub('"', '\\\\"')
+            s = s:gsub('\n', '\\n')
+            s = s:gsub('\r', '\\r')
+            s = s:gsub('\t', '\\t')
+            return '"' .. s .. '"'
         elseif t == "number" or t == "boolean" then
             return tostring(val)
         else

@@ -1,5 +1,5 @@
 -- BossLootTracker - Main Logic and Event Handlers
--- WoW Addon for version 12.0.1 (Midnight)
+-- WoW for version 12.0.1 (Midnight)
 
 -- Addon namespace
 local AddonName, BLT = ...
@@ -35,6 +35,10 @@ local DistributionMethods = {
 
 -- Current encounter tracking
 local CurrentEncounter = nil
+
+-- Track pending loot items (ENCOUNTER_LOOT_RECEIVED fires multiple times per boss)
+local PendingLootItems = {}
+local PendingLootEncounterID = nil
 
 -- Initialize database
 local function InitializeDB()
@@ -76,50 +80,90 @@ end
 
 -- Format timestamp to readable date/time
 function BLT.FormatTimestamp(timestamp)
-    local date = date("%Y-%m-%d %H:%M:%S", timestamp)
-    return date
+    if not timestamp then return "Unknown" end
+    local dateStr = date("%Y-%m-%d %H:%M:%S", timestamp)
+    return dateStr
 end
 
 -- Get raid instance info
 local function GetRaidInstanceInfo()
-    local name, instanceType, difficultyID, difficultyName, maxPlayers, dynamicDifficulty, isDynamic, instanceMapID, instanceGroupSize = GetInstanceInfo()
-    return name, difficultyName
+    local info = {GetInstanceInfo()}
+    if info then
+        return info[1], info[3]  -- name, difficultyName
+    end
+    return nil, nil
 end
 
 -- Handle boss kill event
 local function OnBossKill(event, encounterID, encounterName)
+    local raidName, difficulty = GetRaidInstanceInfo()
+
     CurrentEncounter = {
         id = encounterID,
         name = encounterName,
+        raidName = raidName,
+        difficulty = difficulty,
         timestamp = time()
     }
 
-    -- Get raid instance info
-    local raidName, difficulty = GetRaidInstanceInfo()
-
-    if CurrentEncounter then
-        CurrentEncounter.raidName = raidName
-        CurrentEncounter.difficulty = difficulty
-    end
+    -- Reset pending loot tracking for new encounter
+    PendingLootItems = {}
+    PendingLootEncounterID = encounterID
 end
 
 -- Handle encounter loot received event
-local function OnEncounterLootReceived(event, encounterID, encounterName, itemID, itemLink, quantity, playerName, classFileName, lootMethod)
-    if not encounterID or not itemID or not playerName then
+-- NOTE: ENCOUNTER_LOOT_RECEIVED fires ONCE per item drop
+-- Event params: encounterID, itemID, itemLink, quantity, playerName, classFileName
+-- NO encounterName or lootMethod in this event!
+local function OnEncounterLootReceived(event, encounterID, itemID, itemLink, quantity, playerName, classFileName)
+    -- Validate required fields
+    if not encounterID or not itemID then
         return
     end
 
-    -- Get raid instance info
-    local raidName, difficulty = GetRaidInstanceInfo()
+    -- Validate playerName - must have a valid receiver
+    if not playerName or playerName == "" then
+        return
+    end
 
-    -- Determine distribution method
-    local distributionMethod = DistributionMethods.UNKNOWN
-    if lootMethod == 1 then
-        distributionMethod = DistributionMethods.NEED
-    elseif lootMethod == 2 then
-        distributionMethod = DistributionMethods.GREED
-    elseif lootMethod == 3 then
-        distributionMethod = DistributionMethods.TRANSMOG
+    -- Get boss name from BOSS_KILL tracking or EJ_GetEncounterInfo
+    local bossName = "Unknown"
+    if CurrentEncounter and CurrentEncounter.id == encounterID then
+        bossName = CurrentEncounter.name or "Unknown"
+    else
+        -- Try to get from Encounter Journal
+        local name = EJ_GetEncounterInfo(encounterID)
+        if name then
+            bossName = name
+        end
+    end
+
+    -- Get raid instance info from CurrentEncounter or GetInstanceInfo
+    local raidName, difficulty
+    if CurrentEncounter then
+        raidName = CurrentEncounter.raidName
+        difficulty = CurrentEncounter.difficulty
+    end
+    if not raidName then
+        raidName, difficulty = GetRaidInstanceInfo()
+    end
+
+    -- Fix classFileName - default to UNKNOWN when nil
+    local classFile = classFileName
+    if not classFile or classFile == "" then
+        classFile = "UNKNOWN"
+    end
+
+    -- Handle itemLink - preserve color codes for tooltip display
+    local cleanItemLink = itemLink
+    if not itemLink then
+        cleanItemLink = "item:" .. tostring(itemID)
+    end
+
+    -- Validate quantity
+    local qty = quantity or 1
+    if type(qty) ~= "number" or qty < 1 then
+        qty = 1
     end
 
     -- Create loot record
@@ -127,22 +171,22 @@ local function OnEncounterLootReceived(event, encounterID, encounterName, itemID
         id = #BLT.DB.lootRecords + 1,
         timestamp = time(),
         encounterID = encounterID,
-        bossName = encounterName or "Unknown",
+        bossName = bossName,
         raidName = raidName or "Unknown",
         difficulty = difficulty or "Unknown",
         itemID = itemID,
-        itemLink = itemLink,
-        quantity = quantity or 1,
+        itemLink = cleanItemLink,
+        quantity = qty,
         playerName = playerName,
-        classFileName = classFileName or "UNKNOWN",
-        distributionMethod = distributionMethod
+        classFileName = classFile,
+        distributionMethod = DistributionMethods.UNKNOWN
     }
 
     -- Add to database
     table.insert(BLT.DB.lootRecords, record)
 
-    -- Debug print
-    print("|cff00FF00[BossLootTracker]|r 记录: " .. playerName .. " 获得了 " .. (itemLink or "item:"..itemID))
+    -- Print to chat
+    print("|cff00FF00[BossLootTracker]|r 记录：" .. playerName .. " 获得了 " .. (cleanItemLink or "item:"..tostring(itemID)))
 end
 
 -- Event frame
@@ -162,8 +206,9 @@ EventFrame:SetScript("OnEvent", function(self, event, ...)
         local encounterID, encounterName = ...
         OnBossKill(event, encounterID, encounterName)
     elseif event == "ENCOUNTER_LOOT_RECEIVED" then
-        local encounterID, encounterName, itemID, itemLink, quantity, playerName, classFileName, lootMethod = ...
-        OnEncounterLootReceived(event, encounterID, encounterName, itemID, itemLink, quantity, playerName, classFileName, lootMethod)
+        -- Event params: encounterID, itemID, itemLink, quantity, playerName, classFileName
+        local encounterID, itemID, itemLink, quantity, playerName, classFileName = ...
+        OnEncounterLootReceived(event, encounterID, itemID, itemLink, quantity, playerName, classFileName)
     end
 end)
 
