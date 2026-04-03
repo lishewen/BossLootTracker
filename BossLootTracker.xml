@@ -1,5 +1,0 @@
-<Ui xmlns="http://www.blizzard.com/wow/ui/">
-    <Script file="BossLootTracker.lua"/>
-    <Script file="BossLootTracker_UI.lua"/>
-    <Script file="BossLootTracker_Export.lua"/>
-</Ui>

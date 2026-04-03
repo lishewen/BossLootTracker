@@ -2,7 +2,7 @@
 ## Title: BossLootTracker
 ## Notes-z CN: 自动记录团队副本BOSS战利品掉落
 ## Author: BossLootTracker
-## Version: 1.0.0
+## Version: 1.0.3
 ## SavedVariables: BossLootTrackerDB
 
 BossLootTracker.lua

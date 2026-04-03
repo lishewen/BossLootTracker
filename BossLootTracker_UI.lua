@@ -9,6 +9,9 @@ BLT.UI = {}
 local UI = BLT.UI
 local DB
 
+-- Initialize HeaderButtons table
+UI.HeaderButtons = {}
+
 -- Current filter and sort state
 local currentFilters = {
     raidInstance = "全部",
@@ -657,21 +660,7 @@ function UI.Toggle()
     end
 end
 
--- Initialize UI
-function UI.Initialize()
-    DB = BossLootTrackerDB
-
-    if not UI.MainFrame then
-        CreateMainFrame()
-        CreateFilters(UI.MainFrame)
-        CreateDataTable(UI.MainFrame)
-        CreateActionButtons(UI.MainFrame)
-        CreateEditModeUI()
-        CreateMinimapButton()
-    end
-end
-
--- Create minimap button
+-- Create minimap button (must be defined before UI.Initialize calls it)
 local function CreateMinimapButton()
     local button = CreateFrame("Button", "BossLootTrackerMinimapButton", Minimap)
     button:SetSize(32, 32)
@@ -760,6 +749,20 @@ local function CreateMinimapButton()
 
     minimapButton = button
     UI.MinimapButton = button
+end
+
+-- Initialize UI
+function UI.Initialize()
+    DB = BossLootTrackerDB
+
+    if not UI.MainFrame then
+        CreateMainFrame()
+        CreateFilters(UI.MainFrame)
+        CreateDataTable(UI.MainFrame)
+        CreateActionButtons(UI.MainFrame)
+        CreateEditModeUI()
+        CreateMinimapButton()
+    end
 end
 
 -- Slash command to show UI
