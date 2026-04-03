@@ -762,9 +762,5 @@ function UI.Initialize()
     end
 end
 
--- Slash command to show UI
-hooksecurefunc("SlashCmdList", function(cmd)
-    if cmd == "BOSSLOOTTRACKER" then
-        UI.Initialize()
-    end
-end)
+-- Slash command is registered in main lua file via SlashCmdList
+-- UI.Initialize is called from there

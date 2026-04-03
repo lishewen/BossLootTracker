@@ -6,7 +6,7 @@ local AddonName, BLT = ...
 BLT.DB = BLT or {}
 
 -- Version info
-local Version = GetAddOnMetadata(AddonName, "Version") or "1.0.0"
+local Version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(AddonName, "Version") or "1.0.0"
 
 -- Class colors for text display
 local ClassColors = {
