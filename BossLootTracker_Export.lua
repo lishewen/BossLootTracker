@@ -64,15 +64,8 @@ local function CreateExportDialog()
     copyButton:SetScript("OnClick", function()
         local text = editBox:GetText()
         if text and text ~= "" then
-            -- Try to copy to clipboard
-            if C_Clipboard then
-                C_Clipboard.SetClipboardText(text)
-                print("|cff00FF00[BossLootTracker]|r 已复制到剪贴板")
-            else
-                -- Fallback: select all text so user can manually copy
-                editBox:HighlightText()
-                print("|cff00FF00[BossLootTracker]|r 请使用 Ctrl+C 手动复制")
-            end
+            editBox:HighlightText()
+            print("|cff00FF00[BossLootTracker]|r 请使用 Ctrl+C 手动复制")
         end
     end)
 
@@ -189,6 +182,10 @@ function Export.ShowDialog()
 
     -- Show the dialog
     BLT.UI.ExportFrame:Show()
+
+    -- Auto-select all text for easy copy
+    editBox:SetFocus()
+    editBox:HighlightText()
 end
 
 -- Import data (for future use)
