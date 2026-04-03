@@ -448,21 +448,18 @@ function UI.FilterAndSortRecords()
 
     for _, record in ipairs(BLT.DB.lootRecords) do
         -- Apply filters
+        local skip = false
         if currentFilters.raidInstance ~= "全部" and record.raidName ~= currentFilters.raidInstance then
-            goto continue
+            skip = true
+        elseif currentFilters.boss ~= "全部" and record.bossName ~= currentFilters.boss then
+            skip = true
+        elseif currentFilters.player ~= "全部" and record.playerName ~= currentFilters.player then
+            skip = true
         end
 
-        if currentFilters.boss ~= "全部" and record.bossName ~= currentFilters.boss then
-            goto continue
+        if not skip then
+            table.insert(filteredRecords, record)
         end
-
-        if currentFilters.player ~= "全部" and record.playerName ~= currentFilters.player then
-            goto continue
-        end
-
-        table.insert(filteredRecords, record)
-
-        ::continue::
     end
 
     -- Sort records

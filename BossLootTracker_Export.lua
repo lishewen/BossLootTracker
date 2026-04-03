@@ -101,10 +101,10 @@ local function Base64Encode(data)
         if b then triplet = triplet + b * 256 end
         if c then triplet = triplet + c end
 
-        local index1 = (triplet >> 18) & 0x3F
-        local index2 = (triplet >> 12) & 0x3F
-        local index3 = (triplet >> 6) & 0x3F
-        local index4 = triplet & 0x3F
+        local index1 = math.floor(triplet / 2^18) % 64
+        local index2 = math.floor(triplet / 2^12) % 64
+        local index3 = math.floor(triplet / 2^6) % 64
+        local index4 = triplet % 64
 
         table.insert(result, b64chars:sub(index1 + 1, index1 + 1))
         table.insert(result, b64chars:sub(index2 + 1, index2 + 1))
@@ -234,11 +234,11 @@ local function Base64Decode(data)
             end
         end
 
-        local triplet = (indices[1] << 18) + (indices[2] << 12) + (indices[3] << 6) + indices[4]
+        local triplet = indices[1] * 2^18 + indices[2] * 2^12 + indices[3] * 2^6 + indices[4]
 
-        local byte1 = (triplet >> 16) & 0xFF
-        local byte2 = (triplet >> 8) & 0xFF
-        local byte3 = triplet & 0xFF
+        local byte1 = math.floor(triplet / 2^16) % 256
+        local byte2 = math.floor(triplet / 2^8) % 256
+        local byte3 = triplet % 256
 
         table.insert(result, string.char(byte1))
 
