@@ -42,6 +42,7 @@ local minimapButton = nil
 local function CreateMainFrame()
     local frame = CreateFrame("Frame", "BossLootTrackerFrame", UIParent, "BackdropTemplate")
     frame:SetSize(900, 600)
+    frame:SetPoint("CENTER", UIParent, "CENTER")
     frame:SetClampedToScreen(true)
     frame:SetMovable(true)
     frame:EnableMouse(true)
@@ -633,6 +634,7 @@ end
 
 -- Show the main window
 function UI.Show()
+    print("BLT Show called, MainFrame=" .. tostring(UI.MainFrame ~= nil) .. " shown=" .. tostring(UI.MainFrame and UI.MainFrame:IsShown()))
     if not UI.MainFrame then
         UI.Initialize()
     end
@@ -686,26 +688,23 @@ local function CreateMinimapButton()
         button:SetPoint("CENTER", Minimap, "CENTER", x, y)
     end
 
-    -- Make draggable
-    button:SetScript("OnMouseDown", function(self, button)
-        if button == "LeftButton" then
-            self:StartMoving()
-        end
+    -- Make draggable - Buttons need RegisterForDrag to be draggable
+    button:RegisterForDrag("LeftButton")
+    button:SetScript("OnDragStart", function(self)
+        self:StartMoving()
     end)
 
-    button:SetScript("OnMouseUp", function(self, button)
+    button:SetScript("OnDragStop", function(self)
         self:StopMovingOrSizing()
-        if button == "LeftButton" then
-            -- Calculate new position angle
-            local mx, my = Minimap:GetCenter()
-            local bx, by = self:GetCenter()
-            local angle = math.atan2(by - my, bx - mx)
-            BossLootTrackerDB.settings.minimap.position = angle
-            UpdatePosition()
-        end
+        -- Calculate new position angle
+        local mx, my = Minimap:GetCenter()
+        local bx, by = self:GetCenter()
+        local angle = math.atan2(by - my, bx - mx)
+        BossLootTrackerDB.settings.minimap.position = angle
+        UpdatePosition()
     end)
 
-    -- Left click to toggle main window
+    -- Left click to toggle main window (OnClick still works for clicks)
     button:SetScript("OnClick", function(self, button)
         if button == "LeftButton" then
             UI.Toggle()
@@ -753,12 +752,19 @@ function UI.Initialize()
     DB = BossLootTrackerDB
 
     if not UI.MainFrame then
-        CreateMainFrame()
-        CreateFilters(UI.MainFrame)
-        CreateDataTable(UI.MainFrame)
-        CreateActionButtons(UI.MainFrame)
-        CreateEditModeUI()
-        CreateMinimapButton()
+        local ok, err = pcall(CreateMainFrame)
+        if not ok then print("BLT Error CreateMainFrame: " .. tostring(err)) end
+        ok, err = pcall(function() CreateFilters(UI.MainFrame) end)
+        if not ok then print("BLT Error CreateFilters: " .. tostring(err)) end
+        ok, err = pcall(function() CreateDataTable(UI.MainFrame) end)
+        if not ok then print("BLT Error CreateDataTable: " .. tostring(err)) end
+        ok, err = pcall(function() CreateActionButtons(UI.MainFrame) end)
+        if not ok then print("BLT Error CreateActionButtons: " .. tostring(err)) end
+        ok, err = pcall(CreateEditModeUI)
+        if not ok then print("BLT Error CreateEditModeUI: " .. tostring(err)) end
+        ok, err = pcall(CreateMinimapButton)
+        if not ok then print("BLT Error CreateMinimapButton: " .. tostring(err)) end
+        print("|cff00FF00[BossLootTracker]|r UI initialized, MainFrame=" .. tostring(UI.MainFrame ~= nil))
     end
 end
 
