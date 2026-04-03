@@ -1,0 +1,11 @@
+## Interface: 120001
+## Title: BossLootTracker
+## Notes-z CN: 自动记录团队副本BOSS战利品掉落
+## Author: BossLootTracker
+## Version: 1.0.0
+## SavedVariables: BossLootTrackerDB
+
+BossLootTracker.lua
+BossLootTracker_UI.lua
+BossLootTracker_Export.lua
+
