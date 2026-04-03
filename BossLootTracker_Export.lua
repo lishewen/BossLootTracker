@@ -10,7 +10,7 @@ local Export = BLT.Export
 
 -- Create export dialog
 local function CreateExportDialog()
-    local frame = CreateFrame("Frame", "BossLootTrackerExportFrame", UIParent)
+    local frame = CreateFrame("Frame", "BossLootTrackerExportFrame", UIParent, "BackdropTemplate")
     frame:SetSize(700, 500)
     frame:SetClampedToScreen(true)
     frame:SetMovable(true)
@@ -45,7 +45,7 @@ local function CreateExportDialog()
     scrollFrame:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -35, 60)
 
     -- Edit box for export data
-    local editBox = CreateFrame("EditBox", nil, scrollFrame)
+    local editBox = CreateFrame("EditBox", nil, scrollFrame, "BackdropTemplate")
     editBox:SetSize(645, 350)
     editBox:SetMultiLine(true)
     editBox:SetAutoFocus(false)

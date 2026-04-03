@@ -40,7 +40,7 @@ local minimapButton = nil
 
 -- Create main frame
 local function CreateMainFrame()
-    local frame = CreateFrame("Frame", "BossLootTrackerFrame", UIParent)
+    local frame = CreateFrame("Frame", "BossLootTrackerFrame", UIParent, "BackdropTemplate")
     frame:SetSize(900, 600)
     frame:SetClampedToScreen(true)
     frame:SetMovable(true)
@@ -60,7 +60,7 @@ local function CreateMainFrame()
     })
 
     -- Title bar
-    local titleBar = CreateFrame("Frame", nil, frame)
+    local titleBar = CreateFrame("Frame", nil, frame, "BackdropTemplate")
     titleBar:SetSize(878, 30)
     titleBar:SetPoint("TOP", frame, "TOP", 0, -5)
     titleBar:SetBackdrop({
@@ -200,7 +200,7 @@ end
 
 -- Create data table
 local function CreateDataTable(frame)
-    local tableFrame = CreateFrame("Frame", nil, frame)
+    local tableFrame = CreateFrame("Frame", nil, frame, "BackdropTemplate")
     tableFrame:SetSize(878, 480)
     tableFrame:SetPoint("TOPLEFT", frame, "TOPLEFT", 11, -80)
 
@@ -317,7 +317,7 @@ end
 
 -- Create edit mode UI
 local function CreateEditModeUI()
-    local editFrame = CreateFrame("Frame", "BossLootTrackerEditFrame", UIParent)
+    local editFrame = CreateFrame("Frame", "BossLootTrackerEditFrame", UIParent, "BackdropTemplate")
     editFrame:SetSize(400, 200)
     editFrame:SetClampedToScreen(true)
     editFrame:SetMovable(true)
@@ -477,7 +477,7 @@ end
 
 -- Create table row
 local function CreateTableRow(index, record)
-    local row = CreateFrame("Button", nil, UI.TableContent)
+    local row = CreateFrame("Button", nil, UI.TableContent, "BackdropTemplate")
     row:SetSize(850, 25)
     row:SetPoint("TOPLEFT", UI.TableContent, "TOPLEFT", 0, -(index - 1) * 25)
 
