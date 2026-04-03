@@ -184,8 +184,8 @@ function Export.ShowDialog()
     BLT.UI.ExportFrame:Show()
 
     -- Auto-select all text for easy copy
-    editBox:SetFocus()
-    editBox:HighlightText()
+    BLT.UI.ExportEditBox:SetFocus()
+    BLT.UI.ExportEditBox:HighlightText()
 end
 
 -- Import data (for future use)
