@@ -347,20 +347,53 @@ local function CreateEditModeUI()
     playerLabel:SetPoint("TOPLEFT", editFrame, "TOPLEFT", 20, -50)
     playerLabel:SetText("玩家姓名:")
 
-    local playerEdit = CreateFrame("EditBox", nil, editFrame, "InputBoxTemplate")
-    playerEdit:SetSize(200, 30)
-    playerEdit:SetPoint("TOPLEFT", playerLabel, "BOTTOMLEFT", 0, -5)
+    local playerEdit = CreateFrame("EditBox", "BossLootTrackerPlayerEditBox", editFrame, "BackdropTemplate")
+    playerEdit:SetSize(250, 30)
+    playerEdit:SetPoint("TOPLEFT", playerLabel, "BOTTOMLEFT", 5, -5)
     playerEdit:SetAutoFocus(false)
+    playerEdit:SetFontObject("ChatFontNormal")
+    playerEdit:SetBackdrop({
+        bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
+        edgeFile = "Interface\\Glues\\Common\\TextEdge",
+        tile = true,
+        tileSize = 16,
+        edgeSize = 4,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 }
+    })
+    playerEdit:SetBackdropColor(0, 0, 0, 0.8)
+    playerEdit:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+    playerEdit:SetTextInsets(6, 6, 0, 0)
+    playerEdit:SetScript("OnEscapePressed", function() editFrame:Hide() end)
+    playerEdit:SetScript("OnEnterPressed", function() UI.SaveEdit() end)
     UI.PlayerEdit = playerEdit
+
+    -- Item display (read-only)
+    local itemLabel = editFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    itemLabel:SetPoint("TOPLEFT", playerEdit, "BOTTOMLEFT", 0, -15)
+    itemLabel:SetText("物品:")
+
+    local itemText = editFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    itemText:SetPoint("LEFT", itemLabel, "RIGHT", 10, 0)
+    itemText:SetWidth(280)
+    itemText:SetWordWrap(false)
+    UI.EditItemText = itemText
+
+    -- Boss display (read-only)
+    local bossLabel = editFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    bossLabel:SetPoint("TOPLEFT", itemLabel, "BOTTOMLEFT", 0, -15)
+    bossLabel:SetText("BOSS:")
+
+    local bossText = editFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    bossText:SetPoint("LEFT", bossLabel, "RIGHT", 10, 0)
+    UI.EditBossText = bossText
 
     -- Distribution method dropdown
     local methodLabel = editFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    methodLabel:SetPoint("TOPLEFT", playerEdit, "BOTTOMLEFT", 0, -20)
+    methodLabel:SetPoint("TOPLEFT", bossLabel, "BOTTOMLEFT", 0, -15)
     methodLabel:SetText("分配方式:")
 
     local methodButton = CreateFrame("Button", nil, editFrame, "UIDropDownMenuTemplate")
-    methodButton:SetPoint("TOPLEFT", methodLabel, "BOTTOMLEFT", 0, 0)
-    methodButton:SetSize(150, 30)
+    methodButton:SetPoint("LEFT", methodLabel, "RIGHT", -15, 0)
     UIDropDownMenu_SetWidth(methodButton, 140)
     UIDropDownMenu_Initialize(methodButton, function()
         local methods = { "需求", "贪婪", "幻化", "未知" }
@@ -476,6 +509,10 @@ function UI.FilterAndSortRecords()
     end)
 end
 
+-- Double-click detection for edit mode
+local LastClickTime = 0
+local LastClickRecord = nil
+
 -- Create table row
 local function CreateTableRow(index, record)
     local row = CreateFrame("Button", nil, UI.TableContent, "BackdropTemplate")
@@ -490,8 +527,20 @@ local function CreateTableRow(index, record)
         self:SetBackdropColor(0, 0, 0, 0)
     end)
 
-    row:SetScript("OnDoubleClick", function()
-        UI.StartEdit(record)
+    -- Double-click detection via OnMouseUp + timestamp
+    row:SetScript("OnMouseUp", function(self, button)
+        if button == "LeftButton" then
+            local now = GetTime()
+            if LastClickRecord == record and (now - LastClickTime) < 0.5 then
+                -- Double click detected
+                UI.StartEdit(record)
+                LastClickTime = 0
+                LastClickRecord = nil
+            else
+                LastClickTime = now
+                LastClickRecord = record
+            end
+        end
     end)
 
     row:SetBackdrop({
@@ -599,10 +648,26 @@ function UI.StartEdit(record)
     editMode.recordId = record.id
     editMode.originalData = record
 
-    UI.PlayerEdit:SetText(record.playerName)
-    UIDropDownMenu_SetSelectedValue(UI.MethodButton, record.distributionMethod)
+    UI.PlayerEdit:SetText(record.playerName or "")
+    UIDropDownMenu_SetSelectedValue(UI.MethodButton, record.distributionMethod or "未知")
+
+    -- Show read-only info
+    if UI.EditItemText then
+        local itemName = record.itemLink or ("item:" .. tostring(record.itemID))
+        -- Extract just the display name from itemLink: |Hitem:xxx|h[Name]|h
+        local extracted = itemName:match("|h%[([^%]]+)%]")
+        if not extracted then
+            -- Fallback: strip all escape sequences
+            extracted = itemName:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|H.*|h", ""):gsub("|h", "")
+        end
+        UI.EditItemText:SetText(extracted)
+    end
+    if UI.EditBossText then
+        UI.EditBossText:SetText(record.bossName or "Unknown")
+    end
 
     UI.EditFrame:Show()
+    UI.PlayerEdit:SetFocus()
 end
 
 -- Save edit

@@ -1,5 +1,5 @@
 -- BossLootTracker - Export Module
--- Handles data export functionality
+-- Handles data export functionality (JSON / CSV / Lua Table)
 
 local AddonName, BLT = ...
 
@@ -8,10 +8,14 @@ BLT.Export = {}
 
 local Export = BLT.Export
 
--- Create export dialog
+---------------------------------------------------------------------------
+-- Export dialog
+---------------------------------------------------------------------------
+
 local function CreateExportDialog()
     local frame = CreateFrame("Frame", "BossLootTrackerExportFrame", UIParent, "BackdropTemplate")
-    frame:SetSize(700, 500)
+    frame:SetSize(750, 520)
+    frame:SetPoint("CENTER", UIParent, "CENTER")
     frame:SetClampedToScreen(true)
     frame:SetMovable(true)
     frame:EnableMouse(true)
@@ -34,156 +38,255 @@ local function CreateExportDialog()
     title:SetPoint("TOP", frame, "TOP", 0, -15)
     title:SetText("导出数据")
 
+    -- Format selector
+    local formatLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    formatLabel:SetPoint("TOPLEFT", frame, "TOPLEFT", 25, -45)
+    formatLabel:SetText("导出格式:")
+
+    local formatDropdown = CreateFrame("Button", nil, frame, "UIDropDownMenuTemplate")
+    formatDropdown:SetPoint("LEFT", formatLabel, "RIGHT", -15, 0)
+    UIDropDownMenu_SetWidth(formatDropdown, 130)
+    UIDropDownMenu_Initialize(formatDropdown, function()
+        local formats = {
+            { text = "CSV (推荐)", value = "csv" },
+            { text = "JSON",       value = "json" },
+            { text = "Lua Table",  value = "lua" },
+        }
+        for _, f in ipairs(formats) do
+            UIDropDownMenu_AddButton({
+                text = f.text,
+                value = f.value,
+                func = function()
+                    UIDropDownMenu_SetSelectedValue(formatDropdown, f.value)
+                    -- Regenerate on format change
+                    Export._RefreshContent(formatDropdown)
+                end,
+            })
+        end
+    end)
+    UIDropDownMenu_SetSelectedValue(formatDropdown, "csv")
+    Export._FormatDropdown = formatDropdown
+
     -- Description
     local desc = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    desc:SetPoint("TOP", frame, "TOP", 0, -45)
-    desc:SetText("下面的Base64编码字符串包含了所有战利品记录数据。|n您可以复制并保存此数据用于备份或分享。")
+    desc:SetPoint("TOPLEFT", frame, "TOPLEFT", 25, -72)
+    desc:SetText("全选文本后 Ctrl+C 复制，或点击下方按钮重新生成。")
 
-    -- Scroll frame for export text
+    -- Scroll frame + EditBox
     local scrollFrame = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetPoint("TOPLEFT", frame, "TOPLEFT", 20, -75)
+    scrollFrame:SetPoint("TOPLEFT", frame, "TOPLEFT", 20, -90)
     scrollFrame:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -35, 60)
 
-    -- Edit box for export data
-    local editBox = CreateFrame("EditBox", nil, scrollFrame, "BackdropTemplate")
-    editBox:SetSize(645, 350)
+    local editBox = CreateFrame("EditBox", nil, scrollFrame)
+    editBox:SetSize(680, 360)
     editBox:SetMultiLine(true)
     editBox:SetAutoFocus(false)
     editBox:SetFontObject("GameFontNormalSmall")
-    editBox:SetScript("OnEscapePressed", function()
-        frame:Hide()
-    end)
+    editBox:SetScript("OnEscapePressed", function() frame:Hide() end)
     scrollFrame:SetScrollChild(editBox)
-    BLT.UI.ExportEditBox = editBox
+    Export._EditBox = editBox
 
-    -- Copy button
-    local copyButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    copyButton:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 20, 20)
-    copyButton:SetSize(120, 30)
-    copyButton:SetText("复制到剪贴板")
-    copyButton:SetScript("OnClick", function()
-        local text = editBox:GetText()
-        if text and text ~= "" then
-            editBox:HighlightText()
-            print("|cff00FF00[BossLootTracker]|r 请使用 Ctrl+C 手动复制")
-        end
+    -- Select All button
+    local selectBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    selectBtn:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 20, 20)
+    selectBtn:SetSize(130, 30)
+    selectBtn:SetText("全选并复制")
+    selectBtn:SetScript("OnClick", function()
+        editBox:SetFocus()
+        editBox:HighlightText()
+        print("|cff00FF00[BossLootTracker]|r 文本已全选，请按 Ctrl+C 复制")
+    end)
+
+    -- Regenerate button
+    local regenBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    regenBtn:SetPoint("LEFT", selectBtn, "RIGHT", 10, 0)
+    regenBtn:SetSize(100, 30)
+    regenBtn:SetText("重新生成")
+    regenBtn:SetScript("OnClick", function()
+        Export._RefreshContent(formatDropdown)
     end)
 
     -- Close button
-    local closeButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    closeButton:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -20, 20)
-    closeButton:SetSize(120, 30)
-    closeButton:SetText("关闭")
-    closeButton:SetScript("OnClick", function()
-        frame:Hide()
-    end)
+    local closeBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    closeBtn:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -20, 20)
+    closeBtn:SetSize(100, 30)
+    closeBtn:SetText("关闭")
+    closeBtn:SetScript("OnClick", function() frame:Hide() end)
 
-    -- Close button (X)
+    -- X button
     local closeX = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
     closeX:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -5, -5)
-    closeX:SetScript("OnClick", function()
-        frame:Hide()
-    end)
+    closeX:SetScript("OnClick", function() frame:Hide() end)
 
     BLT.UI.ExportFrame = frame
 end
 
--- Encode data to Base64 (standard implementation)
-local function Base64Encode(data)
-    local b64chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-    local result = {}
+---------------------------------------------------------------------------
+-- Internal: refresh export content based on selected format
+---------------------------------------------------------------------------
 
-    for i = 1, #data, 3 do
-        local a, b, c = data:byte(i, i + 2)
-        local triplet = 0
+function Export._RefreshContent(dropdown)
+    local format = UIDropDownMenu_GetSelectedValue(dropdown) or "csv"
+    local text
+    if format == "json" then
+        text = Export.GenerateJSON()
+    elseif format == "lua" then
+        text = Export.GenerateLua()
+    else
+        text = Export.GenerateCSV()
+    end
+    Export._EditBox:SetText(text)
+end
 
-        if a then triplet = triplet + a * 65536 end
-        if b then triplet = triplet + b * 256 end
-        if c then triplet = triplet + c end
+---------------------------------------------------------------------------
+-- CSV export
+---------------------------------------------------------------------------
 
-        local index1 = math.floor(triplet / 2^18) % 64
-        local index2 = math.floor(triplet / 2^12) % 64
-        local index3 = math.floor(triplet / 2^6) % 64
-        local index4 = triplet % 64
+function Export.GenerateCSV()
+    local lines = {}
+    table.insert(lines, "序号,BOSS,团队副本,难度,物品ID,物品,数量,玩家,职业,分配方式,时间")
 
-        table.insert(result, b64chars:sub(index1 + 1, index1 + 1))
-        table.insert(result, b64chars:sub(index2 + 1, index2 + 1))
+    for i, r in ipairs(BLT.DB.lootRecords) do
+        -- Strip color codes from itemLink for CSV
+        local cleanName = r.itemLink or ("item:" .. tostring(r.itemID))
+        cleanName = cleanName:gsub("|c%x%x%x%x%x%x%x%x", "")
+        cleanName = cleanName:gsub("|r", "")
+        cleanName = cleanName:gsub("|H.-|h", "")
+        cleanName = cleanName:gsub("|h", "")
 
-        if b then
-            table.insert(result, b64chars:sub(index3 + 1, index3 + 1))
-        else
-            table.insert(result, "=")
-        end
-
-        if c then
-            table.insert(result, b64chars:sub(index4 + 1, index4 + 1))
-        else
-            table.insert(result, "=")
-        end
+        local line = string.format('%d,"%s","%s","%s",%d,"%s",%d,"%s","%s","%s","%s"',
+            i,
+            r.bossName or "",
+            r.raidName or "",
+            r.difficulty or "",
+            r.itemID or 0,
+            cleanName,
+            r.quantity or 1,
+            r.playerName or "",
+            r.classFileName or "",
+            r.distributionMethod or "",
+            BLT.FormatTimestamp(r.timestamp)
+        )
+        table.insert(lines, line)
     end
 
-    return table.concat(result)
+    return table.concat(lines, "\n")
 end
 
--- Generate export data
+---------------------------------------------------------------------------
+-- JSON export (plain text, NOT base64)
+---------------------------------------------------------------------------
+
+function Export.GenerateJSON()
+    local parts = {}
+    table.insert(parts, '{')
+    table.insert(parts, '  "version": "' .. (BLT.Version or "1.0.0") .. '",')
+    table.insert(parts, '  "exportDate": "' .. date("%Y-%m-%d %H:%M:%S") .. '",')
+    table.insert(parts, '  "totalRecords": ' .. #BLT.DB.lootRecords .. ',')
+    table.insert(parts, '  "records": [')
+
+    for i, r in ipairs(BLT.DB.lootRecords) do
+        local comma = i < #BLT.DB.lootRecords and "," or ""
+        local cleanLink = (r.itemLink or ""):gsub("\\", "\\\\"):gsub('"', '\\"'):gsub("\n", "\\n"):gsub("\r", "\\r"):gsub("\t", "\\t")
+        local line = string.format(
+            '    {"id":%d,"bossName":"%s","raidName":"%s","difficulty":"%s","itemID":%d,"itemLink":"%s","quantity":%d,"playerName":"%s","classFileName":"%s","distributionMethod":"%s","timestamp":"%s"}%s',
+            i,
+            r.bossName or "",
+            r.raidName or "",
+            r.difficulty or "",
+            r.itemID or 0,
+            cleanLink,
+            r.quantity or 1,
+            r.playerName or "",
+            r.classFileName or "",
+            r.distributionMethod or "",
+            BLT.FormatTimestamp(r.timestamp),
+            comma
+        )
+        table.insert(parts, line)
+    end
+
+    table.insert(parts, '  ]')
+    table.insert(parts, '}')
+
+    return table.concat(parts, "\n")
+end
+
+---------------------------------------------------------------------------
+-- Lua table export
+---------------------------------------------------------------------------
+
+function Export.GenerateLua()
+    local lines = {}
+    table.insert(lines, "-- BossLootTracker Export")
+    table.insert(lines, "-- " .. date("%Y-%m-%d %H:%M:%S"))
+    table.insert(lines, "BossLootTrackerDB_Import = {")
+    table.insert(lines, "  lootRecords = {")
+
+    for i, r in ipairs(BLT.DB.lootRecords) do
+        local cleanLink = (r.itemLink or ""):gsub("\\", "\\\\"):gsub('"', '\\"')
+        local line = string.format(
+            '    {id=%d, bossName=[[%s]], raidName=[[%s]], difficulty=[[%s]], itemID=%d, itemLink=[[%s]], quantity=%d, playerName=[[%s]], classFileName=[[%s]], distributionMethod=[[%s]], timestamp=%d},',
+            i,
+            r.bossName or "",
+            r.raidName or "",
+            r.difficulty or "",
+            r.itemID or 0,
+            cleanLink,
+            r.quantity or 1,
+            r.playerName or "",
+            r.classFileName or "",
+            r.distributionMethod or "",
+            r.timestamp or 0
+        )
+        table.insert(lines, line)
+    end
+
+    table.insert(lines, "  },")
+    table.insert(lines, "}")
+
+    return table.concat(lines, "\n")
+end
+
+---------------------------------------------------------------------------
+-- Show dialog (called by main UI / slash command)
+---------------------------------------------------------------------------
+
+function Export.ShowDialog()
+    if not BLT.UI.ExportFrame then
+        CreateExportDialog()
+    end
+
+    -- Generate content based on current format selection
+    Export._RefreshContent(Export._FormatDropdown)
+
+    BLT.UI.ExportFrame:Show()
+    Export._EditBox:SetFocus()
+    Export._EditBox:HighlightText()
+end
+
+---------------------------------------------------------------------------
+-- Legacy / backward compat
+---------------------------------------------------------------------------
+
+-- Keep GenerateExportData as JSON for anything that still calls it
 function Export.GenerateExportData()
-    local exportData = {
-        version = BLT.Version or "1.0.0",
-        exportDate = date("%Y-%m-%d %H:%M:%S"),
-        serverRegion = GetCurrentRegion() or "Unknown",
-        serverRealm = GetRealmName() or "Unknown",
-        totalRecords = #BLT.DB.lootRecords,
-        records = BLT.DB.lootRecords
-    }
-
-    -- Convert to JSON string (simple implementation)
-    local jsonString = Export.TableToJson(exportData)
-
-    -- Encode to Base64
-    local base64String = Base64Encode(jsonString)
-
-    return base64String
+    return Export.GenerateJSON()
 end
 
--- Simple table to JSON converter
 function Export.TableToJson(tbl)
-    local result = {}
-
-    local function serialize(val)
+    -- Minimal serializer kept for backward compat
+    local function ser(val)
         local t = type(val)
         if t == "table" then
-            -- Check if array-like
-            local isArray = true
-            local maxIndex = 0
-            for k, _ in pairs(val) do
-                if type(k) ~= "number" or k < 1 or math.floor(k) ~= k then
-                    isArray = false
-                    break
-                end
-                if k > maxIndex then maxIndex = k end
+            local items = {}
+            for k, v in pairs(val) do
+                local key = type(k) == "string" and '"' .. k .. '"' or tostring(k)
+                table.insert(items, key .. ":" .. ser(v))
             end
-            if isArray and maxIndex == #val then
-                local items = {}
-                for i = 1, #val do
-                    table.insert(items, serialize(val[i]))
-                end
-                return "[" .. table.concat(items, ",") .. "]"
-            else
-                local items = {}
-                for k, v in pairs(val) do
-                    local key = type(k) == "string" and '"' .. k .. '"' or tostring(k)
-                    table.insert(items, key .. ":" .. serialize(v))
-                end
-                return "{" .. table.concat(items, ",") .. "}"
-            end
+            return "{" .. table.concat(items, ",") .. "}"
         elseif t == "string" then
-            -- Escape special chars including WoW color pipe characters
-            local s = val
-            s = s:gsub('\\', '\\\\\\')
-            s = s:gsub('"', '\\\\"')
-            s = s:gsub('\n', '\\n')
-            s = s:gsub('\r', '\\r')
-            s = s:gsub('\t', '\\t')
+            local s = val:gsub("\\", "\\\\"):gsub('"', '\\"'):gsub("\n", "\\n"):gsub("\r", "\\r"):gsub("\t", "\\t")
             return '"' .. s .. '"'
         elseif t == "number" or t == "boolean" then
             return tostring(val)
@@ -191,106 +294,5 @@ function Export.TableToJson(tbl)
             return "null"
         end
     end
-
-    return serialize(tbl)
-end
-
--- Show export dialog
-function Export.ShowDialog()
-    if not BLT.UI.ExportFrame then
-        CreateExportDialog()
-    end
-
-    -- Generate export data
-    local exportString = Export.GenerateExportData()
-    BLT.UI.ExportEditBox:SetText(exportString)
-
-    -- Show the dialog
-    BLT.UI.ExportFrame:Show()
-
-    -- Auto-select all text for easy copy
-    BLT.UI.ExportEditBox:SetFocus()
-    BLT.UI.ExportEditBox:HighlightText()
-end
-
--- Import data (for future use)
-function Export.ImportData(base64String)
-    -- Base64 decode
-    local jsonString = Export.Base64Decode(base64String)
-
-    -- Parse JSON (would need a JSON parser)
-    -- For now, just return the string
-    return jsonString
-end
-
--- Base64 decode (standard implementation)
-local function Base64Decode(data)
-    local b64chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-    local charMap = {}
-    for i = 1, #b64chars do
-        charMap[b64chars:sub(i, i)] = i - 1
-    end
-
-    -- Remove any characters that aren't valid Base64
-    data = data:gsub('[^'..b64chars..'=]', '')
-
-    local result = {}
-    local paddingCount = 0
-
-    -- Count padding characters
-    for i = #data, 1, -1 do
-        if data:sub(i, i) == '=' then
-            paddingCount = paddingCount + 1
-        else
-            break
-        end
-    end
-
-    for i = 1, #data, 4 do
-        local chars = { data:byte(i, i + 3) }
-
-        local indices = {}
-        for j = 1, 4 do
-            local char = data:sub(i + j - 1, i + j - 1)
-            if char ~= '=' then
-                indices[j] = charMap[char]
-            else
-                indices[j] = 0
-            end
-        end
-
-        local triplet = indices[1] * 2^18 + indices[2] * 2^12 + indices[3] * 2^6 + indices[4]
-
-        local byte1 = math.floor(triplet / 2^16) % 256
-        local byte2 = math.floor(triplet / 2^8) % 256
-        local byte3 = triplet % 256
-
-        table.insert(result, string.char(byte1))
-
-        if paddingCount < 2 then
-            table.insert(result, string.char(byte2))
-        end
-
-        if paddingCount < 1 then
-            table.insert(result, string.char(byte3))
-        end
-    end
-
-    return table.concat(result)
-end
-
-Export.Base64Decode = Base64Decode
-
--- Export to file (for future use)
-function Export.ExportToFile(filename)
-    local exportData = Export.GenerateExportData()
-
-    -- This would require file system access which WoW doesn't provide directly
-    -- Users would need to copy the data and save it manually
-    print("|cff00FF00[BossLootTracker]|r 请使用导出对话框复制数据并手动保存到文件")
-end
-
--- Initialize export module
-function Export.Initialize()
-    -- Initialization if needed
+    return ser(tbl)
 end

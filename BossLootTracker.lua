@@ -40,6 +40,10 @@ local CurrentEncounter = nil
 local PendingLootItems = {}
 local PendingLootEncounterID = nil
 
+-- Double-click detection for edit mode
+local LastClickTime = 0
+local LastClickRecord = nil
+
 -- Initialize database
 local function InitializeDB()
     if not BossLootTrackerDB then
@@ -121,6 +125,13 @@ local function OnEncounterLootReceived(event, encounterID, itemID, itemLink, qua
         return
     end
 
+    -- Filter out non-boss loot:
+    -- encounterID == 0 means the loot came from mining, rare elites, or other non-boss sources
+    -- Only record loot from actual boss encounters (encounterID > 0)
+    if encounterID == 0 then
+        return
+    end
+
     -- Validate playerName - must have a valid receiver
     if not playerName or playerName == "" then
         return
@@ -166,6 +177,10 @@ local function OnEncounterLootReceived(event, encounterID, itemID, itemLink, qua
         qty = 1
     end
 
+    -- Dedup: mark this item as recorded
+    local dedupKey = tostring(encounterID) .. "_" .. tostring(itemID) .. "_" .. playerName
+    PendingLootItems[dedupKey] = true
+
     -- Create loot record
     local record = {
         id = #BLT.DB.lootRecords + 1,
@@ -189,11 +204,105 @@ local function OnEncounterLootReceived(event, encounterID, itemID, itemLink, qua
     print("|cff00FF00[BossLootTracker]|r 记录：" .. playerName .. " 获得了 " .. (cleanItemLink or "item:"..tostring(itemID)))
 end
 
+-- Handle CHAT_MSG_LOOT for raid loot detection
+-- In raids, loot is often distributed via ML/PL and shows up as chat messages
+-- Pattern: "[Player] 获得了物品：[ItemLink]" or "[Player]收到了物品：[ItemLink]xN"
+local function OnChatMsgLoot(event, msg, ...)
+    -- Only process if we're in a raid (party loot is handled by ENCOUNTER_LOOT_RECEIVED)
+    local inRaid = IsInRaid()
+    if not inRaid then return end
+
+    -- Only process if we have a current encounter (inside a boss fight or just killed)
+    if not CurrentEncounter then return end
+
+    -- Check if we already recorded this from ENCOUNTER_LOOT_RECEIVED
+    -- to avoid duplicates. We use a simple dedup based on itemLink + playerName
+
+    -- Pattern 1: "玩家名获得了物品：|Hitem:xxx|h[name]|h"
+    -- Pattern 2: "玩家名收到了物品：|Hitem:xxx|h[name]|h|x3"
+    local playerName, itemLink = msg:match("^(.+)获得了物品：(.+)$")
+    if not playerName then
+        playerName, itemLink = msg:match("^(.+)收到了物品：(.+)$")
+    end
+
+    -- Also try English patterns
+    if not playerName then
+        playerName, itemLink = msg:match("^(.+) receives loot: (.+)$")
+    end
+    if not playerName then
+        playerName, itemLink = msg:match("^(.+) gets loot: (.+)$")
+    end
+
+    if not playerName or not itemLink then return end
+
+    -- Extract quantity from itemLink suffix like x2
+    local quantity = 1
+    local qtyMatch = itemLink:match("|h%x(%d+)")
+    if qtyMatch then
+        quantity = tonumber(qtyMatch) or 1
+    end
+
+    -- Extract itemID from itemLink: |Hitem:12345:...
+    local itemID = itemLink:match("item:(%d+)")
+    if not itemID then return end
+    itemID = tonumber(itemID)
+
+    -- Clean playerName (remove server suffix if present)
+    playerName = playerName:match("^(.-)%-") or playerName
+
+    -- Dedup check: skip if we already have this exact record
+    local dedupKey = tostring(CurrentEncounter.id) .. "_" .. tostring(itemID) .. "_" .. playerName
+    if PendingLootItems[dedupKey] then return end
+    PendingLootItems[dedupKey] = true
+
+    -- Get player's class
+    local classFile = "UNKNOWN"
+    if playerName then
+        -- Try to get class from raid roster
+        for i = 1, GetNumGroupMembers() do
+            local name, _, _, _, _, _, _, _, _, _, class = GetRaidRosterInfo(i)
+            if name then
+                local shortName = name:match("^(.-)%-") or name
+                if shortName == playerName then
+                    classFile = class or "UNKNOWN"
+                    break
+                end
+            end
+        end
+    end
+
+    -- Get raid info
+    local raidName = CurrentEncounter.raidName
+    local difficulty = CurrentEncounter.difficulty
+    if not raidName then
+        raidName, difficulty = GetRaidInstanceInfo()
+    end
+
+    local record = {
+        id = #BLT.DB.lootRecords + 1,
+        timestamp = time(),
+        encounterID = CurrentEncounter.id,
+        bossName = CurrentEncounter.name or "Unknown",
+        raidName = raidName or "Unknown",
+        difficulty = difficulty or "Unknown",
+        itemID = itemID,
+        itemLink = itemLink,
+        quantity = quantity,
+        playerName = playerName,
+        classFileName = classFile,
+        distributionMethod = DistributionMethods.UNKNOWN
+    }
+
+    table.insert(BLT.DB.lootRecords, record)
+    print("|cff00FF00[BossLootTracker]|r 记录：" .. playerName .. " 获得了 " .. (itemLink or "item:"..tostring(itemID)))
+end
+
 -- Event frame
 local EventFrame = CreateFrame("Frame")
 EventFrame:RegisterEvent("ADDON_LOADED")
 EventFrame:RegisterEvent("BOSS_KILL")
 EventFrame:RegisterEvent("ENCOUNTER_LOOT_RECEIVED")
+EventFrame:RegisterEvent("CHAT_MSG_LOOT")
 EventFrame:SetScript("OnEvent", function(self, event, ...)
     if event == "ADDON_LOADED" then
         local addonName = ...
@@ -209,6 +318,8 @@ EventFrame:SetScript("OnEvent", function(self, event, ...)
         -- Event params: encounterID, itemID, itemLink, quantity, playerName, classFileName
         local encounterID, itemID, itemLink, quantity, playerName, classFileName = ...
         OnEncounterLootReceived(event, encounterID, itemID, itemLink, quantity, playerName, classFileName)
+    elseif event == "CHAT_MSG_LOOT" then
+        OnChatMsgLoot(event, ...)
     end
 end)
 
