@@ -515,33 +515,11 @@ local LastClickRecord = nil
 
 -- Create table row
 local function CreateTableRow(index, record)
-    local row = CreateFrame("Button", nil, UI.TableContent, "BackdropTemplate")
+    -- Use Frame (not Button) so child FontStrings don't steal mouse events
+    local row = CreateFrame("Frame", nil, UI.TableContent, "BackdropTemplate")
     row:SetSize(850, 25)
     row:SetPoint("TOPLEFT", UI.TableContent, "TOPLEFT", 0, -(index - 1) * 25)
-
-    row:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(0.2, 0.2, 0.2, 0.8)
-    end)
-
-    row:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(0, 0, 0, 0)
-    end)
-
-    -- Double-click detection via OnMouseUp + timestamp
-    row:SetScript("OnMouseUp", function(self, button)
-        if button == "LeftButton" then
-            local now = GetTime()
-            if LastClickRecord == record and (now - LastClickTime) < 0.5 then
-                -- Double click detected
-                UI.StartEdit(record)
-                LastClickTime = 0
-                LastClickRecord = nil
-            else
-                LastClickTime = now
-                LastClickRecord = record
-            end
-        end
-    end)
+    row:EnableMouse(true)
 
     row:SetBackdrop({
         bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
@@ -553,11 +531,61 @@ local function CreateTableRow(index, record)
     })
     row:SetBackdropColor(0, 0, 0, 0)
 
-    -- Row data
+    -- Highlight on hover + item tooltip
+    row:SetScript("OnEnter", function(self)
+        self:SetBackdropColor(0.2, 0.2, 0.2, 0.8)
+        if record.itemLink then
+            local mx, my = GetCursorPosition()
+            local scale = self:GetEffectiveScale()
+            local left = self:GetLeft()
+            if left then
+                local relX = (mx / scale) - left
+                if relX >= 195 and relX <= 395 then
+                    GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+                    GameTooltip:SetHyperlink(record.itemLink)
+                    GameTooltip:Show()
+                end
+            end
+        end
+    end)
+
+    row:SetScript("OnLeave", function(self)
+        self:SetBackdropColor(0, 0, 0, 0)
+        GameTooltip:Hide()
+    end)
+
+    -- Double-click to edit, Shift+click item column to paste link
+    row:SetScript("OnMouseUp", function(self, button)
+        if button == "LeftButton" then
+            if IsShiftKeyDown() and record.itemLink then
+                local mx, my = GetCursorPosition()
+                local scale = self:GetEffectiveScale()
+                local left = self:GetLeft()
+                if left then
+                    local relX = (mx / scale) - left
+                    if relX >= 195 and relX <= 395 then
+                        ChatEdit_InsertLink(record.itemLink)
+                        return
+                    end
+                end
+            end
+            local now = GetTime()
+            if LastClickRecord == record and (now - LastClickTime) < 0.5 then
+                UI.StartEdit(record)
+                LastClickTime = 0
+                LastClickRecord = nil
+            else
+                LastClickTime = now
+                LastClickRecord = record
+            end
+        end
+    end)
+
+    -- Row data columns
     local columns = {
         { text = tostring(index), width = 40, align = "CENTER" },
         { text = record.bossName, width = 150, align = "LEFT" },
-        { text = record.itemLink or "item:" .. record.itemID, width = 200, align = "LEFT", isLink = true },
+        { text = record.itemLink or "item:" .. record.itemID, width = 200, align = "LEFT" },
         { text = record.playerName, width = 150, align = "LEFT" },
         { text = BLT.GetClassColor(record.classFileName) .. record.classFileName .. "|r", width = 80, align = "CENTER" },
         { text = record.distributionMethod, width = 80, align = "CENTER" },
@@ -568,35 +596,9 @@ local function CreateTableRow(index, record)
     for _, col in ipairs(columns) do
         local text = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         text:SetPoint("TOPLEFT", row, "TOPLEFT", xOffset, 0)
-
         if col.align == "CENTER" then
             text:SetPoint("CENTER", row, "TOPLEFT", xOffset + col.width / 2, 0)
         end
-
-        if col.isLink and record.itemLink then
-            -- Make item link clickable
-            local itemButton = CreateFrame("Button", nil, row)
-            itemButton:SetSize(col.width, 25)
-            itemButton:SetPoint("TOPLEFT", row, "TOPLEFT", xOffset, 0)
-            itemButton:SetScript("OnEnter", function()
-                GameTooltip:SetOwner(itemButton, "ANCHOR_CURSOR")
-                GameTooltip:SetHyperlink(record.itemLink)
-                GameTooltip:Show()
-            end)
-            itemButton:SetScript("OnLeave", function()
-                GameTooltip:Hide()
-            end)
-            itemButton:SetScript("OnClick", function()
-                if IsShiftKeyDown() then
-                    ChatEdit_InsertLink(record.itemLink)
-                end
-            end)
-
-            local highlight = itemButton:CreateTexture(nil, "HIGHLIGHT")
-            highlight:SetAllPoints(itemButton)
-            highlight:SetColorTexture(1, 1, 1, 0.2)
-        end
-
         text:SetText(col.text)
         xOffset = xOffset + col.width
     end
