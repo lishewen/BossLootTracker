@@ -604,6 +604,7 @@ end
 
 -- Start editing a record
 function UI.StartEdit(record)
+    print("|cff00FF00[BossLootTracker]|r StartEdit called, EditFrame=" .. tostring(UI.EditFrame ~= nil))
     editMode.active = true
     editMode.recordId = record.id
     editMode.originalData = record
@@ -626,7 +627,9 @@ function UI.StartEdit(record)
         UI.EditBossText:SetText(record.bossName or "Unknown")
     end
 
+    print("|cff00FF00[BossLootTracker]|r Showing EditFrame...")
     UI.EditFrame:Show()
+    print("|cff00FF00[BossLootTracker]|r EditFrame shown, visible=" .. tostring(UI.EditFrame:IsVisible()))
     UI.PlayerEdit:SetFocus()
 end
 
