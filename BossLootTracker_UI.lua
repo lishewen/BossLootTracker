@@ -234,9 +234,8 @@ local function CreateDataTable(frame)
         { text = "BOSS", width = 150, column = "bossName" },
         { text = "物品", width = 200, column = "itemLink" },
         { text = "玩家", width = 150, column = "playerName" },
-        { text = "职业", width = 80, column = "classFileName" },
         { text = "方式", width = 80, column = "distributionMethod" },
-        { text = "时间", width = 130, column = "timestamp" },
+        { text = "时间", width = 150, column = "timestamp" },
         { text = "操作", width = 60, column = "action" }
     }
 
@@ -541,9 +540,8 @@ local function CreateTableRow(index, record)
         { text = record.bossName, width = 150, align = "LEFT" },
         { text = record.itemLink or "item:" .. record.itemID, width = 200, align = "LEFT" },
         { text = record.playerName, width = 150, align = "LEFT" },
-        { text = BLT.GetClassColor(record.classFileName) .. record.classFileName .. "|r", width = 80, align = "CENTER" },
         { text = record.distributionMethod, width = 80, align = "CENTER" },
-        { text = BLT.FormatTimestamp(record.timestamp), width = 130, align = "LEFT" }
+        { text = BLT.FormatTimestamp(record.timestamp), width = 150, align = "LEFT" }
     }
 
     local xOffset = 5
