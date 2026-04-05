@@ -1,5 +1,6 @@
 -- BossLootTracker - Export Module
 -- Handles data export functionality (JSON / CSV / Lua Table)
+-- Author: lishewen
 
 local AddonName, BLT = ...
 

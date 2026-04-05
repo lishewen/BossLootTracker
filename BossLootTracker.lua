@@ -1,5 +1,8 @@
 -- BossLootTracker - Main Logic and Event Handlers
 -- WoW for version 12.0.1 (Midnight)
+-- Author: lishewen
+-- License: MIT
+-- https://github.com/lishewen/BossLootTracker
 
 -- Addon namespace
 local AddonName, BLT = ...

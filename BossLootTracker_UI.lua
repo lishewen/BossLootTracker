@@ -1,5 +1,6 @@
 -- BossLootTracker - UI Module
 -- Creates and manages the main window UI
+-- Author: lishewen
 
 local AddonName, BLT = ...
 
