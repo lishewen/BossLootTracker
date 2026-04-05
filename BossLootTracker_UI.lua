@@ -517,6 +517,8 @@ local function CreateTableRow(index, record)
     row:SetSize(850, 25)
     row:SetPoint("TOPLEFT", UI.TableContent, "TOPLEFT", 0, -(index - 1) * 25)
 
+    row:EnableMouse(true)
+
     row:SetBackdrop({
         bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
         edgeFile = "",
@@ -526,6 +528,29 @@ local function CreateTableRow(index, record)
         insets = { left = 0, right = 0, top = 0, bottom = 0 }
     })
     row:SetBackdropColor(0, 0, 0, 0)
+
+    row:SetScript("OnEnter", function(self)
+        self:SetBackdropColor(0.2, 0.2, 0.2, 0.8)
+        -- Show item tooltip if mouse is over the item column (x: 195-395)
+        if record.itemLink then
+            local mx, my = GetCursorPosition()
+            local scale = self:GetEffectiveScale()
+            local left = self:GetLeft()
+            if left then
+                local relX = (mx / scale) - left
+                if relX >= 195 and relX <= 395 then
+                    GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+                    GameTooltip:SetHyperlink(record.itemLink)
+                    GameTooltip:Show()
+                end
+            end
+        end
+    end)
+
+    row:SetScript("OnLeave", function(self)
+        self:SetBackdropColor(0, 0, 0, 0)
+        GameTooltip:Hide()
+    end)
 
     -- Row data columns
     local columns = {
