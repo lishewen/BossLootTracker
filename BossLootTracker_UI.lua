@@ -569,6 +569,9 @@ local function CreateTableRow(index, record)
     return row
 end
 
+-- Refresh the table
+function UI.Refresh()
+    UI.FilterAndSortRecords()
 
     -- Clear existing rows
     for _, child in pairs({ UI.TableContent:GetChildren() }) do
