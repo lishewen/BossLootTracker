@@ -326,6 +326,7 @@ local function CreateEditModeUI()
     editFrame:RegisterForDrag("LeftButton")
     editFrame:SetScript("OnDragStart", editFrame.StartMoving)
     editFrame:SetScript("OnDragStop", editFrame.StopMovingOrSizing)
+    editFrame:SetPoint("CENTER", UIParent, "CENTER")
     editFrame:Hide()
 
     editFrame:SetBackdrop({
@@ -553,7 +554,6 @@ local function CreateTableRow(index, record)
     editBtn:SetText("编辑")
     editBtn:RegisterForClicks("LeftButtonUp")
     editBtn:SetScript("OnClick", function()
-        print("|cff00FF00[BossLootTracker]|r 编辑按钮被点击")
         -- Ensure edit UI is created
         if not UI.EditFrame then
             CreateEditModeUI()
@@ -604,7 +604,6 @@ end
 
 -- Start editing a record
 function UI.StartEdit(record)
-    print("|cff00FF00[BossLootTracker]|r StartEdit called, EditFrame=" .. tostring(UI.EditFrame ~= nil))
     editMode.active = true
     editMode.recordId = record.id
     editMode.originalData = record
@@ -627,9 +626,7 @@ function UI.StartEdit(record)
         UI.EditBossText:SetText(record.bossName or "Unknown")
     end
 
-    print("|cff00FF00[BossLootTracker]|r Showing EditFrame...")
     UI.EditFrame:Show()
-    print("|cff00FF00[BossLootTracker]|r EditFrame shown, visible=" .. tostring(UI.EditFrame:IsVisible()))
     UI.PlayerEdit:SetFocus()
 end
 
