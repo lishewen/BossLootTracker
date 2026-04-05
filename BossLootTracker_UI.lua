@@ -512,7 +512,7 @@ end
 -- Create table row
 local function CreateTableRow(index, record)
     local row = CreateFrame("Frame", nil, UI.TableContent, "BackdropTemplate")
-    row:SetSize(900, 25)
+    row:SetSize(850, 25)
     row:SetPoint("TOPLEFT", UI.TableContent, "TOPLEFT", 0, -(index - 1) * 25)
 
     row:SetBackdrop({
@@ -551,7 +551,9 @@ local function CreateTableRow(index, record)
     editBtn:SetSize(50, 20)
     editBtn:SetPoint("TOPLEFT", row, "TOPLEFT", xOffset + 5, -2)
     editBtn:SetText("编辑")
+    editBtn:RegisterForClicks("LeftButtonUp")
     editBtn:SetScript("OnClick", function()
+        print("|cff00FF00[BossLootTracker]|r 编辑按钮被点击")
         -- Ensure edit UI is created
         if not UI.EditFrame then
             CreateEditModeUI()
