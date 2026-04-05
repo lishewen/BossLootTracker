@@ -514,7 +514,6 @@ local function CreateTableRow(index, record)
     local row = CreateFrame("Frame", nil, UI.TableContent, "BackdropTemplate")
     row:SetSize(900, 25)
     row:SetPoint("TOPLEFT", UI.TableContent, "TOPLEFT", 0, -(index - 1) * 25)
-    row:EnableMouse(true)
 
     row:SetBackdrop({
         bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
@@ -525,14 +524,6 @@ local function CreateTableRow(index, record)
         insets = { left = 0, right = 0, top = 0, bottom = 0 }
     })
     row:SetBackdropColor(0, 0, 0, 0)
-
-    row:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(0.2, 0.2, 0.2, 0.8)
-    end)
-
-    row:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(0, 0, 0, 0)
-    end)
 
     -- Row data columns
     local columns = {
@@ -561,6 +552,10 @@ local function CreateTableRow(index, record)
     editBtn:SetPoint("TOPLEFT", row, "TOPLEFT", xOffset + 5, -2)
     editBtn:SetText("编辑")
     editBtn:SetScript("OnClick", function()
+        -- Ensure edit UI is created
+        if not UI.EditFrame then
+            CreateEditModeUI()
+        end
         UI.StartEdit(record)
     end)
 
