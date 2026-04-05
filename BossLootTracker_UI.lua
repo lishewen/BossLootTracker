@@ -236,7 +236,8 @@ local function CreateDataTable(frame)
         { text = "玩家", width = 150, column = "playerName" },
         { text = "职业", width = 80, column = "classFileName" },
         { text = "方式", width = 80, column = "distributionMethod" },
-        { text = "时间", width = 150, column = "timestamp" }
+        { text = "时间", width = 130, column = "timestamp" },
+        { text = "操作", width = 60, column = "action" }
     }
 
     local xOffset = 5
@@ -509,15 +510,10 @@ function UI.FilterAndSortRecords()
     end)
 end
 
--- Double-click detection for edit mode
-local LastClickTime = 0
-local LastClickRecord = nil
-
 -- Create table row
 local function CreateTableRow(index, record)
-    -- Use Frame (not Button) so child FontStrings don't steal mouse events
     local row = CreateFrame("Frame", nil, UI.TableContent, "BackdropTemplate")
-    row:SetSize(850, 25)
+    row:SetSize(900, 25)
     row:SetPoint("TOPLEFT", UI.TableContent, "TOPLEFT", 0, -(index - 1) * 25)
     row:EnableMouse(true)
 
@@ -531,54 +527,12 @@ local function CreateTableRow(index, record)
     })
     row:SetBackdropColor(0, 0, 0, 0)
 
-    -- Highlight on hover + item tooltip
     row:SetScript("OnEnter", function(self)
         self:SetBackdropColor(0.2, 0.2, 0.2, 0.8)
-        if record.itemLink then
-            local mx, my = GetCursorPosition()
-            local scale = self:GetEffectiveScale()
-            local left = self:GetLeft()
-            if left then
-                local relX = (mx / scale) - left
-                if relX >= 195 and relX <= 395 then
-                    GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
-                    GameTooltip:SetHyperlink(record.itemLink)
-                    GameTooltip:Show()
-                end
-            end
-        end
     end)
 
     row:SetScript("OnLeave", function(self)
         self:SetBackdropColor(0, 0, 0, 0)
-        GameTooltip:Hide()
-    end)
-
-    -- Double-click to edit, Shift+click item column to paste link
-    row:SetScript("OnMouseUp", function(self, button)
-        if button == "LeftButton" then
-            if IsShiftKeyDown() and record.itemLink then
-                local mx, my = GetCursorPosition()
-                local scale = self:GetEffectiveScale()
-                local left = self:GetLeft()
-                if left then
-                    local relX = (mx / scale) - left
-                    if relX >= 195 and relX <= 395 then
-                        ChatEdit_InsertLink(record.itemLink)
-                        return
-                    end
-                end
-            end
-            local now = GetTime()
-            if LastClickRecord == record and (now - LastClickTime) < 0.5 then
-                UI.StartEdit(record)
-                LastClickTime = 0
-                LastClickRecord = nil
-            else
-                LastClickTime = now
-                LastClickRecord = record
-            end
-        end
     end)
 
     -- Row data columns
@@ -589,7 +543,7 @@ local function CreateTableRow(index, record)
         { text = record.playerName, width = 150, align = "LEFT" },
         { text = BLT.GetClassColor(record.classFileName) .. record.classFileName .. "|r", width = 80, align = "CENTER" },
         { text = record.distributionMethod, width = 80, align = "CENTER" },
-        { text = BLT.FormatTimestamp(record.timestamp), width = 150, align = "LEFT" }
+        { text = BLT.FormatTimestamp(record.timestamp), width = 130, align = "LEFT" }
     }
 
     local xOffset = 5
@@ -603,12 +557,18 @@ local function CreateTableRow(index, record)
         xOffset = xOffset + col.width
     end
 
+    -- Edit button at the end of each row
+    local editBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+    editBtn:SetSize(50, 20)
+    editBtn:SetPoint("TOPLEFT", row, "TOPLEFT", xOffset + 5, -2)
+    editBtn:SetText("编辑")
+    editBtn:SetScript("OnClick", function()
+        UI.StartEdit(record)
+    end)
+
     return row
 end
 
--- Refresh the table
-function UI.Refresh()
-    UI.FilterAndSortRecords()
 
     -- Clear existing rows
     for _, child in pairs({ UI.TableContent:GetChildren() }) do
