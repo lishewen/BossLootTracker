@@ -319,6 +319,7 @@ end
 -- Create edit mode UI
 local function CreateEditModeUI()
     local editFrame = CreateFrame("Frame", "BossLootTrackerEditFrame", UIParent, "BackdropTemplate")
+    editFrame:SetFrameStrata("DIALOG")
     editFrame:SetSize(400, 280)
     editFrame:SetClampedToScreen(true)
     editFrame:SetMovable(true)

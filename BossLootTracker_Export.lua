@@ -14,6 +14,7 @@ local Export = BLT.Export
 
 local function CreateExportDialog()
     local frame = CreateFrame("Frame", "BossLootTrackerExportFrame", UIParent, "BackdropTemplate")
+    frame:SetFrameStrata("DIALOG")
     frame:SetSize(750, 520)
     frame:SetPoint("CENTER", UIParent, "CENTER")
     frame:SetClampedToScreen(true)
