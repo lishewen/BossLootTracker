@@ -109,6 +109,15 @@ end
 local EncounterTimeout = nil
 local ENCOUNTER_TRACK_DURATION = 300 -- 5 minutes after boss kill to keep tracking loot
 
+-- Handle encounter end - don't clear immediately, loot happens after
+local function OnEncounterEnd(event, encounterID, encounterName, difficultyID, groupSize)
+    if BLT_DebugMode then
+        print("|cffFFD700[BLT Debug]|r ENCOUNTER_END: " .. tostring(encounterID) .. " " .. tostring(encounterName))
+    end
+    -- Don't clear CurrentEncounter - loot distribution happens after boss death
+    -- It will be overwritten when ENCOUNTER_START fires for the next boss
+end
+
 -- Handle boss kill event
 local function OnBossKill(event, encounterID, encounterName)
     local raidName, difficulty = GetRaidInstanceInfo()
@@ -616,12 +625,23 @@ local EventFrame = CreateFrame("Frame")
 EventFrame:RegisterEvent("ADDON_LOADED")
 EventFrame:RegisterEvent("BOSS_KILL")
 EventFrame:RegisterEvent("ENCOUNTER_START")
+EventFrame:RegisterEvent("ENCOUNTER_END")
 EventFrame:RegisterEvent("ENCOUNTER_LOOT_RECEIVED")
 EventFrame:RegisterEvent("CHAT_MSG_LOOT")
 EventFrame:RegisterEvent("LOOT_OPENED")
 EventFrame:RegisterEvent("LOOT_CLOSED")
 EventFrame:RegisterEvent("CHAT_MSG_SYSTEM")
+EventFrame:RegisterEvent("CHAT_MSG_RAID")
+EventFrame:RegisterEvent("CHAT_MSG_RAID_WARNING")
 EventFrame:SetScript("OnEvent", function(self, event, ...)
+    -- Aggressive debug: log ALL events in debug mode to find what fires
+    if BLT_DebugMode then
+        local args = {...}
+        local msg = args[1] or ""
+        if type(msg) == "string" and (msg:find("战利品") or msg:find("loot") or msg:find("Loot") or msg:find("赢得了") or msg:find("掷骰") or msg:find("roll")) then
+            print("|cffFFD700[BLT Debug]|r Event=" .. event .. " msg=" .. msg:sub(1, 120))
+        end
+    end
     if event == "ADDON_LOADED" then
         local addonName = ...
         if addonName == AddonName then
