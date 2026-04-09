@@ -50,6 +50,9 @@ local LastClickRecord = nil
 -- Raid loot tracking (Master Looter / Party Loot mode)
 local IsRaidLootOpen = false  -- 标记当前是否在团本拾取状态
 
+-- Debug mode flag
+local BLT_DebugMode = false
+
 -- Initialize database
 local function InitializeDB()
     if not BossLootTrackerDB then
@@ -194,11 +197,7 @@ local function OnEncounterLootReceived(event, encounterID, itemID, itemLink, qua
     -- Skip consumables, quest items, containers, trade goods (non-reagent), misc
     local _, _, _, _, _, _, _, _, itemEquipLoc, _, _, itemClassID, itemSubClassID = GetItemInfo(itemID)
     if itemClassID then
-        -- 0=Armor, 1=Weapon, 2=Gem (cata+), 3=Container (skip), 4=Consumable (skip)
-        -- 5=Trade Goods, 6=Gem (classic), 7=Glyph, 8=Quest (skip), 9=Misc
-        -- 10=Recipe, 11=Reagent (cata+)
         if itemClassID == 3 or itemClassID == 4 or itemClassID == 8 then
-            -- Container, Consumable, Quest item - skip
             if BLT_DebugMode then
                 print("|cffFFD700[BLT Debug]|r Filtered itemClassID=" .. itemClassID .. " item=" .. tostring(itemID))
             end
@@ -216,14 +215,13 @@ local function OnEncounterLootReceived(event, encounterID, itemID, itemLink, qua
     if CurrentEncounter and CurrentEncounter.id == encounterID then
         bossName = CurrentEncounter.name or "Unknown"
     else
-        -- Try to get from Encounter Journal
         local name = EJ_GetEncounterInfo(encounterID)
         if name then
             bossName = name
         end
     end
 
-    -- Get raid instance info from CurrentEncounter or GetInstanceInfo
+    -- Get raid instance info
     local raidName, difficulty
     if CurrentEncounter then
         raidName = CurrentEncounter.raidName
@@ -233,19 +231,16 @@ local function OnEncounterLootReceived(event, encounterID, itemID, itemLink, qua
         raidName, difficulty = GetRaidInstanceInfo()
     end
 
-    -- Fix classFileName - default to UNKNOWN when nil
     local classFile = classFileName
     if not classFile or classFile == "" then
         classFile = "UNKNOWN"
     end
 
-    -- Handle itemLink - preserve color codes for tooltip display
     local cleanItemLink = itemLink
     if not itemLink then
         cleanItemLink = "item:" .. tostring(itemID)
     end
 
-    -- Validate quantity
     local qty = quantity or 1
     if type(qty) ~= "number" or qty < 1 then
         qty = 1
@@ -255,7 +250,6 @@ local function OnEncounterLootReceived(event, encounterID, itemID, itemLink, qua
     local dedupKey = tostring(encounterID) .. "_" .. tostring(itemID) .. "_" .. playerName
     PendingLootItems[dedupKey] = true
 
-    -- Create loot record
     local record = {
         id = #BLT.DB.lootRecords + 1,
         timestamp = time(),
@@ -271,150 +265,62 @@ local function OnEncounterLootReceived(event, encounterID, itemID, itemLink, qua
         distributionMethod = DistributionMethods.UNKNOWN
     }
 
-    -- Add to database
     table.insert(BLT.DB.lootRecords, record)
-
-    -- Print to chat
     print("|cff00FF00[BossLootTracker]|r 记录：" .. playerName .. " 获得了 " .. (cleanItemLink or "item:"..tostring(itemID)))
 end
 
--- Handle CHAT_MSG_LOOT for raid loot detection
--- In raids, loot is often distributed via ML/PL and shows up as chat messages
--- Pattern: "[Player] 获得了物品：[ItemLink]" or "[Player]收到了物品：[ItemLink]xN"
--- Also handles new format: "玩家名获得了战利品： [ilevel-type:name]"
-local function OnChatMsgLoot(event, msg, ...)
-    -- Debug: log CHAT_MSG_LOOT in raids
-    if BLT_DebugMode and IsInRaid() then
-        print("|cffFFD700[BLT Debug]|r CHAT_MSG_LOOT: " .. msg)
+--------------------------------------------------------------------------------
+-- Shared helpers for CHAT_MSG_LOOT / CHAT_MSG_SYSTEM parsing
+--------------------------------------------------------------------------------
+
+-- Extract item info from new-format loot bracket like [256-锁甲手:无拘狂暴者的护手]
+-- Returns: itemID (number or nil), itemLink (string or nil)
+local function ParseLootBracket(text)
+    local bracketContent = text:match("%[(.+)%]") or text
+    -- Item name is after the last colon inside brackets
+    local itemName = bracketContent:match(":([^%]:]+)$")
+    if not itemName then
+        itemName = bracketContent:match("%-(.+)$") or bracketContent
     end
-    
-    -- Only process if we're in a raid (party loot is handled by ENCOUNTER_LOOT_RECEIVED)
-    local inRaid = IsInRaid()
-    if not inRaid then return end
+    itemName = itemName:gsub("[%s%]]+$", ""):gsub("^%s+", "")
+    if not itemName or itemName == "" then return nil, nil end
 
-    -- Process new-format loot messages: 玩家名获得了战利品： [ilevel-type:name]
-    if CurrentEncounter then
-        local newLootPlayer, newLootItem = msg:match("^(.+)获得了战利品[：:]%s*(.+)$")
-        if newLootPlayer and newLootItem then
-            local recipient = newLootPlayer:gsub("%s+$", "")
-            local lootDetail = newLootItem:match("%[(.+)%]") or newLootItem
-            local itemName = lootDetail:match(":(%S+)") or lootDetail
+    local giiName, giiLink = GetItemInfo(itemName)
+    if giiLink then
+        local id = giiLink:match("item:(%d+)")
+        if id then return tonumber(id), giiLink end
+    end
+    return nil, nil
+end
 
-            local itemID = nil
-            local giiName, giiLink = GetItemInfo(itemName or "")
-            if giiLink then
-                itemID = giiLink:match("item:(%d+)")
-                if itemID then itemID = tonumber(itemID) end
-                itemName = giiLink
-            end
-
-            if itemID and itemName then
-                local dedupKey = tostring(CurrentEncounter.id) .. "_" .. tostring(itemID) .. "_" .. recipient
-                if PendingLootItems[dedupKey] then return end
-                PendingLootItems[dedupKey] = true
-
-                local classFile = "UNKNOWN"
-                for i = 1, GetNumGroupMembers() do
-                    local name, _, _, _, _, _, _, _, _, _, class = GetRaidRosterInfo(i)
-                    if name then
-                        local shortName = name:match("^(.-)%-") or name
-                        if shortName == recipient then
-                            classFile = class or "UNKNOWN"
-                            break
-                        end
-                    end
-                end
-
-                local raidName = CurrentEncounter.raidName
-                local difficulty = CurrentEncounter.difficulty
-                if not raidName then
-                    raidName, difficulty = GetRaidInstanceInfo()
-                end
-
-                local record = {
-                    id = #BLT.DB.lootRecords + 1,
-                    timestamp = time(),
-                    encounterID = CurrentEncounter.id,
-                    bossName = CurrentEncounter.name or "Unknown",
-                    raidName = raidName or "Unknown",
-                    difficulty = difficulty or "Unknown",
-                    itemID = itemID,
-                    itemLink = itemName,
-                    quantity = 1,
-                    playerName = recipient,
-                    classFileName = classFile,
-                    distributionMethod = DistributionMethods.UNKNOWN
-                }
-
-                table.insert(BLT.DB.lootRecords, record)
-                print("|cff00FF00[BossLootTracker]|r 记录：" .. recipient .. " 获得了 " .. (itemName or "item:"..tostring(itemID)))
-                return
+-- Find player class from raid roster by short name (without server suffix)
+local function FindPlayerClass(searchName)
+    if not searchName then return "UNKNOWN" end
+    for i = 1, GetNumGroupMembers() do
+        local name, _, _, _, _, _, _, _, _, _, class = GetRaidRosterInfo(i)
+        if name then
+            local shortName = name:match("^(.-)%-") or name
+            if shortName == searchName then
+                return class or "UNKNOWN"
             end
         end
     end
+    return "UNKNOWN"
+end
 
-    -- Only process if we have a current encounter (inside a boss fight or just killed)
-    if not CurrentEncounter then return end
-
-    -- Check if we already recorded this from ENCOUNTER_LOOT_RECEIVED
-    -- to avoid duplicates. We use a simple dedup based on itemLink + playerName
-
-    -- Pattern 1: "玩家名获得了物品：|Hitem:xxx|h[name]|h"
-    -- Pattern 2: "玩家名收到了物品：|Hitem:xxx|h[name]|h|x3"
-    local playerName, itemLink = msg:match("^(.+)获得了物品：(.+)$")
-    if not playerName then
-        playerName, itemLink = msg:match("^(.+)收到了物品：(.+)$")
-    end
-
-    -- Also try English patterns
-    if not playerName then
-        playerName, itemLink = msg:match("^(.+) receives loot: (.+)$")
-    end
-    if not playerName then
-        playerName, itemLink = msg:match("^(.+) gets loot: (.+)$")
-    end
-
-    if not playerName or not itemLink then return end
-
-    -- Extract quantity from itemLink suffix like x2
-    local quantity = 1
-    local qtyMatch = itemLink:match("|h%x(%d+)")
-    if qtyMatch then
-        quantity = tonumber(qtyMatch) or 1
-    end
-
-    -- Extract itemID from itemLink: |Hitem:12345:...
-    local itemID = itemLink:match("item:(%d+)")
-    if not itemID then return end
-    itemID = tonumber(itemID)
-
-    -- Clean playerName (remove server suffix if present)
-    playerName = playerName:match("^(.-)%-") or playerName
-
-    -- Dedup check: skip if we already have this exact record
-    local dedupKey = tostring(CurrentEncounter.id) .. "_" .. tostring(itemID) .. "_" .. playerName
-    if PendingLootItems[dedupKey] then return end
+-- Record a loot item with dedup check. Returns true if recorded.
+local function RecordLootItem(encounterID, recipient, itemID, itemLink, distributionMethod)
+    if not encounterID or not recipient or not itemID then return false end
+    local dedupKey = tostring(encounterID) .. "_" .. tostring(itemID) .. "_" .. recipient
+    if PendingLootItems[dedupKey] then return false end
     PendingLootItems[dedupKey] = true
 
-    -- Get player's class
-    local classFile = "UNKNOWN"
-    if playerName then
-        -- Try to get class from raid roster
-        for i = 1, GetNumGroupMembers() do
-            local name, _, _, _, _, _, _, _, _, _, class = GetRaidRosterInfo(i)
-            if name then
-                local shortName = name:match("^(.-)%-") or name
-                if shortName == playerName then
-                    classFile = class or "UNKNOWN"
-                    break
-                end
-            end
-        end
+    local classFile = FindPlayerClass(recipient)
+    local raidName, difficulty
+    if CurrentEncounter then
+        raidName = CurrentEncounter.raidName
+        difficulty = CurrentEncounter.difficulty
     end
-
-    -- Get raid info
-    local raidName = CurrentEncounter.raidName
-    local difficulty = CurrentEncounter.difficulty
     if not raidName then
         raidName, difficulty = GetRaidInstanceInfo()
     end
@@ -422,40 +328,123 @@ local function OnChatMsgLoot(event, msg, ...)
     local record = {
         id = #BLT.DB.lootRecords + 1,
         timestamp = time(),
-        encounterID = CurrentEncounter.id,
-        bossName = CurrentEncounter.name or "Unknown",
+        encounterID = encounterID,
+        bossName = (CurrentEncounter and CurrentEncounter.name) or "Unknown",
         raidName = raidName or "Unknown",
         difficulty = difficulty or "Unknown",
         itemID = itemID,
         itemLink = itemLink,
-        quantity = quantity,
-        playerName = playerName,
+        quantity = 1,
+        playerName = recipient,
         classFileName = classFile,
-        distributionMethod = DistributionMethods.UNKNOWN
+        distributionMethod = distributionMethod or DistributionMethods.UNKNOWN
     }
 
     table.insert(BLT.DB.lootRecords, record)
-    print("|cff00FF00[BossLootTracker]|r 记录：" .. playerName .. " 获得了 " .. (itemLink or "item:"..tostring(itemID)))
+    print("|cff00FF00[BossLootTracker]|r 记录：" .. recipient .. " 获得了 " .. (itemLink or "item:"..tostring(itemID)))
+    return true
 end
 
--- Debug mode flag
-local BLT_DebugMode = false
+--------------------------------------------------------------------------------
+-- CHAT_MSG_LOOT handler
+--------------------------------------------------------------------------------
+-- Format A: "[战利品]：玩家名(需求 - N，主专精)赢得了： [ilevel-type:name]"
+-- Format B: "玩家名-服务器获得了战利品： [ilevel-type:name]"
+-- Format C: "玩家名获得了物品：|Hitem:xxx|h[name]|h" (old style)
+local function OnChatMsgLoot(event, msg, ...)
+    if BLT_DebugMode and IsInRaid() then
+        print("|cffFFD700[BLT Debug]|r CHAT_MSG_LOOT: " .. msg)
+    end
+
+    local inRaid = IsInRaid()
+    if not inRaid then return end
+    if not CurrentEncounter then return end
+
+    local recipient = nil
+    local itemID = nil
+    local itemLink = nil
+    local distributionMethod = DistributionMethods.UNKNOWN
+
+    -- Format A: [战利品]：玩家名(需求/贪婪/幻化 - N，主专精)赢得了： [ilevel-type:name]
+    -- Also: [战利品]: 玩家名(幻化 - 58) 赢得： [ilevel-type:name]
+    do
+        local winnerAll = msg:match("%[战利品%]%s*[：:]%s*(.+?)%s*[赢获]得")
+        if winnerAll then
+            recipient = winnerAll:match("^(.-)%s*%(")
+            if recipient then recipient = recipient:gsub("%s+$", "") end
+            if not recipient or recipient == "" then
+                recipient = winnerAll:gsub("%s+$", "")
+            end
+            -- Distribution method
+            local methodStr = winnerAll:match("%((.-)%)") or ""
+            if methodStr:find("需求") then
+                distributionMethod = DistributionMethods.NEED
+            elseif methodStr:find("贪婪") then
+                distributionMethod = DistributionMethods.GREED
+            elseif methodStr:find("幻化") then
+                distributionMethod = DistributionMethods.TRANSMOG
+            end
+            -- Item from after 赢得了：
+            local lootPart = msg:match("赢得了[：:]%s*(.+)$")
+            if lootPart then
+                itemID, itemLink = ParseLootBracket(lootPart)
+            end
+            if BLT_DebugMode then
+                print("|cffFFD700[BLT Debug]|r FormatA: recipient=" .. tostring(recipient) .. " itemID=" .. tostring(itemID) .. " method=" .. tostring(distributionMethod))
+            end
+        end
+    end
+
+    -- Format B: 玩家名-服务器获得了战利品： [ilevel-type:name]
+    if not recipient then
+        local newLootPlayer, newLootItem = msg:match("^(.+)获得了战利品[：:]%s*(.+)$")
+        if newLootPlayer and newLootItem then
+            recipient = newLootPlayer:match("^(.-)%-") or newLootPlayer
+            recipient = recipient:gsub("%s+$", "")
+            itemID, itemLink = ParseLootBracket(newLootItem)
+            if BLT_DebugMode then
+                print("|cffFFD700[BLT Debug]|r FormatB: recipient=" .. tostring(recipient) .. " itemID=" .. tostring(itemID))
+            end
+        end
+    end
+
+    -- If we found a valid item from new formats, record it
+    if recipient and itemID and itemLink then
+        RecordLootItem(CurrentEncounter.id, recipient, itemID, itemLink, distributionMethod)
+        return
+    end
+
+    -- Format C: old-style "玩家名获得了物品：|Hitem:xxx|h[name]|h"
+    local playerName, oldItemLink = msg:match("^(.+)获得了物品：(.+)$")
+    if not playerName then
+        playerName, oldItemLink = msg:match("^(.+)收到了物品：(.+)$")
+    end
+    if not playerName then
+        playerName, oldItemLink = msg:match("^(.+) receives loot: (.+)$")
+    end
+    if not playerName then
+        playerName, oldItemLink = msg:match("^(.+) gets loot: (.+)$")
+    end
+
+    if not playerName or not oldItemLink then return end
+
+    local extractedItemID = oldItemLink:match("item:(%d+)")
+    if not extractedItemID then return end
+    extractedItemID = tonumber(extractedItemID)
+
+    playerName = playerName:match("^(.-)%-") or playerName
+    playerName = playerName:gsub("%s+$", "")
+
+    RecordLootItem(CurrentEncounter.id, playerName, extractedItemID, oldItemLink, DistributionMethods.UNKNOWN)
+end
 
 -- Handle LOOT_OPENED for raid loot mode detection
--- In raids, ENCOUNTER_LOOT_RECEIVED may not fire depending on loot method
--- We track all non-personal loot methods via CHAT_MSG_LOOT and CHAT_MSG_SYSTEM
 local function OnLootOpened(event)
-    -- Only track in raids
     if not IsInRaid() then return end
-    
     local lootMethod = GetLootMethod()
-    -- Debug logging
     if BLT_DebugMode then
         print("|cffFFD700[BLT Debug]|r LOOT_OPENED, lootMethod=" .. tostring(lootMethod))
     end
-    
-    -- Track all raid loot methods except personalloot
-    -- Because with personal loot ENCOUNTER_LOOT_RECEIVED already works
     if lootMethod and lootMethod ~= "personalloot" then
         IsRaidLootOpen = true
     end
@@ -466,62 +455,54 @@ local function OnLootClosed(event)
     IsRaidLootOpen = false
 end
 
--- Handle CHAT_MSG_SYSTEM for raid loot distribution messages
--- This covers both Master Looter and Group Loot (ILvL system with need/greed/transmog roll)
+--------------------------------------------------------------------------------
+-- CHAT_MSG_SYSTEM handler
+--------------------------------------------------------------------------------
+-- Handles Master Looter and Group Loot distribution messages
 local function OnChatMsgSystem(event, msg, ...)
-    -- Only process in raids with active encounter
     if not IsInRaid() or not CurrentEncounter then return end
-    
-    -- Debug: log all loot-related CHAT_MSG_SYSTEM in raids
-    if BLT_DebugMode and (msg:find("|Hitem:") or msg:find("[战利品]")) then
+
+    if BLT_DebugMode and (msg:find("|Hitem:") or msg:find("战利品")) then
         print("|cffFFD700[BLT Debug]|r CHAT_MSG_SYSTEM: " .. msg)
     end
-    
-    -- Process messages containing either item links (|Hitem:) or new format loot brackets
+
     local hasItemLink = msg:find("|Hitem:")
-    local hasLootBracket = msg:find("%[%d+%-.-%]%s*[^%]]*%]") or msg:find("[战利品]")
+    local hasLootBracket = msg:find("%[%d+%-.-%]") or msg:find("战利品")
     if not hasItemLink and not hasLootBracket then return end
-    
+
     local distributor, itemLink, recipient
-    
+    local itemID = nil
+    local distributionMethod = DistributionMethods.UNKNOWN
+
     -- ML pattern 1: "XXX 指定了 |Hitem:...|h[...] |h 给 玩家名"
     distributor, itemLink, recipient = msg:match("^(.+)%s 指定了 (.+)%s 给%s(.+)$")
-    
-    -- ML pattern 2: "XXX 将 |Hitem:...|h[...] |h 分配给了 玩家名"
     if not itemLink then
         distributor, itemLink, recipient = msg:match("^(.+)%s 将 (.+)%s 分配给了%s(.+)$")
     end
-    
-    -- ML pattern 3: "XXX 分配了 |Hitem:...|h[...] |h 给 玩家名"
     if not itemLink then
         distributor, itemLink, recipient = msg:match("^(.+)%s 分配了 (.+)%s 给%s(.+)$")
     end
-    
-    -- Group Loot pattern: "玩家名 赢得了 |Hitem:...|h[...] |h 的掷骰"
+
+    -- Group Loot patterns
     if not itemLink then
         recipient, itemLink = msg:match("^(.+)%s 赢得了 (.+)%s 的掷骰$")
     end
-    
-    -- Group Loot pattern: "玩家名 通过需求获得了 |Hitem:...|h[...] |h"
     if not itemLink then
         recipient, itemLink = msg:match("^(.+)%s 通过需求获得了 (.+)$")
+        if recipient then distributionMethod = DistributionMethods.NEED end
     end
-    
-    -- Group Loot pattern: "玩家名 通过贪婪获得了 |Hitem:...|h[...] |h"
     if not itemLink then
         recipient, itemLink = msg:match("^(.+)%s 通过贪婪获得了 (.+)$")
+        if recipient then distributionMethod = DistributionMethods.GREED end
     end
-    
-    -- Group Loot pattern: "玩家名 通过幻化获得了 |Hitem:...|h[...] |h"
     if not itemLink then
         recipient, itemLink = msg:match("^(.+)%s 通过幻化获得了 (.+)$")
+        if recipient then distributionMethod = DistributionMethods.TRANSMOG end
     end
-    
-    -- Group Loot pattern: "玩家名 已经获得了 |Hitem:...|h[...] |h" (auto-awarded)
     if not itemLink then
         recipient, itemLink = msg:match("^(.+)%s 已经获得了 (.+)$")
     end
-    
+
     -- English fallback patterns
     if not itemLink then
         distributor, itemLink, recipient = msg:match("^(.+)%s distributed (.+)%s to%s(.+)$")
@@ -532,30 +513,27 @@ local function OnChatMsgSystem(event, msg, ...)
     if not itemLink then
         recipient, itemLink = msg:match("^(.+)%s won (.+)$")
     end
-    
-    if not itemLink or not recipient then
-        -- Try new-format loot patterns: [战利品]：玩家名(需求 - N，主专精)赢得了： [276-副手:物品名]
-        -- Pattern: [战利品]：XXX赢得了： [ilevel-type:name]
-        local winner, lootDetail = msg:match("%[战利品%]%s*[：:]%s*(.+)%s*(%S-)%s*[赢获]得")
-        if not winner then
-            winner, lootDetail = msg:match("%[战利品%]%s*[：:]%s*(.+)赢得了[：:]%s*(.+)" )
-        end
-        if winner and lootDetail then
-            -- winner might be "深爱如长风(需求 - 96，主专精)"
-            recipient = winner:match("^(.-)%s*%(") or winner
-            recipient = recipient:gsub("%s+$", "")
-            -- lootDetail is like "276-副手:艾蔑悔恨魔典" or "276:艾林硬化的裂隙绽放"
-            -- Try to extract itemID from lootDetail using the item name
-            local itemName = lootDetail:match(":(%S+)") or lootDetail:match("]-(%S+)") or lootDetail
-            -- Use GetItemInfo to find itemID from item name
-            if itemName then
-                itemID = nil
-                local giiName, giiLink = GetItemInfo(itemName)
-                if giiLink then
-                    itemID = giiLink:match("item:(%d+)")
-                    if itemID then itemID = tonumber(itemID) end
-                    itemLink = giiLink -- Use proper itemLink for display
-                end
+
+    -- New-format [战利品] patterns in system messages
+    if not itemLink then
+        local winnerAll = msg:match("%[战利品%]%s*[：:]%s*(.+?)%s*[赢获]得")
+        if winnerAll then
+            recipient = winnerAll:match("^(.-)%s*%(")
+            if recipient then recipient = recipient:gsub("%s+$", "") end
+            if not recipient or recipient == "" then
+                recipient = winnerAll:gsub("%s+$", "")
+            end
+            local methodStr = winnerAll:match("%((.-)%)") or ""
+            if methodStr:find("需求") then
+                distributionMethod = DistributionMethods.NEED
+            elseif methodStr:find("贪婪") then
+                distributionMethod = DistributionMethods.GREED
+            elseif methodStr:find("幻化") then
+                distributionMethod = DistributionMethods.TRANSMOG
+            end
+            local lootPart = msg:match("赢得了[：:]%s*(.+)$")
+            if lootPart then
+                itemID, itemLink = ParseLootBracket(lootPart)
             end
         end
     end
@@ -570,54 +548,12 @@ local function OnChatMsgSystem(event, msg, ...)
         end
     end
     if not itemID then return end
-    
-    -- Clean recipient name (remove server suffix)
+
+    -- Clean recipient name
     recipient = recipient:match("^(.-)%-") or recipient
-    recipient = recipient:gsub("%s+$", "")  -- Trim trailing spaces
-    
-    -- Dedup check
-    local dedupKey = tostring(CurrentEncounter.id) .. "_" .. tostring(itemID) .. "_" .. recipient
-    if PendingLootItems[dedupKey] then return end
-    PendingLootItems[dedupKey] = true
-    
-    -- Get recipient's class from raid roster
-    local classFile = "UNKNOWN"
-    for i = 1, GetNumGroupMembers() do
-        local name, _, _, _, _, _, _, _, _, _, class = GetRaidRosterInfo(i)
-        if name then
-            local shortName = name:match("^(.-)%-") or name
-            if shortName == recipient then
-                classFile = class or "UNKNOWN"
-                break
-            end
-        end
-    end
-    
-    -- Get raid info
-    local raidName = CurrentEncounter.raidName
-    local difficulty = CurrentEncounter.difficulty
-    if not raidName then
-        raidName, difficulty = GetRaidInstanceInfo()
-    end
-    
-    -- Create loot record
-    local record = {
-        id = #BLT.DB.lootRecords + 1,
-        timestamp = time(),
-        encounterID = CurrentEncounter.id,
-        bossName = CurrentEncounter.name or "Unknown",
-        raidName = raidName or "Unknown",
-        difficulty = difficulty or "Unknown",
-        itemID = itemID,
-        itemLink = itemLink,
-        quantity = 1,
-        playerName = recipient,
-        classFileName = classFile,
-        distributionMethod = DistributionMethods.UNKNOWN
-    }
-    
-    table.insert(BLT.DB.lootRecords, record)
-    print("|cff00FF00[BossLootTracker]|r 记录：" .. recipient .. " 获得了 " .. (itemLink or "item:"..tostring(itemID)))
+    recipient = recipient:gsub("%s+$", "")
+
+    RecordLootItem(CurrentEncounter.id, recipient, itemID, itemLink, distributionMethod)
 end
 
 -- Event frame
@@ -634,7 +570,7 @@ EventFrame:RegisterEvent("CHAT_MSG_SYSTEM")
 EventFrame:RegisterEvent("CHAT_MSG_RAID")
 EventFrame:RegisterEvent("CHAT_MSG_RAID_WARNING")
 EventFrame:SetScript("OnEvent", function(self, event, ...)
-    -- Aggressive debug: log ALL events in debug mode to find what fires
+    -- Debug: log loot-related events
     if BLT_DebugMode then
         local args = {...}
         local msg = args[1] or ""
@@ -655,8 +591,10 @@ EventFrame:SetScript("OnEvent", function(self, event, ...)
     elseif event == "ENCOUNTER_START" then
         local encounterID, encounterName, difficultyID, groupSize = ...
         OnEncounterStart(event, encounterID, encounterName, difficultyID, groupSize)
+    elseif event == "ENCOUNTER_END" then
+        local encounterID, encounterName, difficultyID, groupSize = ...
+        OnEncounterEnd(event, encounterID, encounterName, difficultyID, groupSize)
     elseif event == "ENCOUNTER_LOOT_RECEIVED" then
-        -- Event params: encounterID, itemID, itemLink, quantity, playerName, classFileName
         local encounterID, itemID, itemLink, quantity, playerName, classFileName = ...
         OnEncounterLootReceived(event, encounterID, itemID, itemLink, quantity, playerName, classFileName)
     elseif event == "CHAT_MSG_LOOT" then
@@ -687,10 +625,8 @@ SlashCmdList["BOSSLOOTTRACKER"] = function(msg)
             BLT.UI.Hide()
         end
     elseif msg == "clear" then
-        -- Clear all records
         StaticPopup_Show("BOSSLOOTTRACKER_CLEAR_CONFIRM")
     elseif msg == "export" then
-        -- Show export dialog
         if BLT.Export and BLT.Export.ShowDialog then
             BLT.Export.ShowDialog()
         end
@@ -738,7 +674,6 @@ local function CreateEditDialog()
         button1 = "保存",
         button2 = "取消",
         OnAccept = function()
-            -- Save changes handled by UI module
             if BLT.UI and BLT.UI.SaveEdit then
                 BLT.UI.SaveEdit()
             end
