@@ -290,7 +290,14 @@ local function ParseLootBracket(text)
         local id = giiLink:match("item:(%d+)")
         if id then return tonumber(id), giiLink end
     end
-    return nil, nil
+
+    -- GetItemInfo may return nil if item not cached yet.
+    -- Register for item data loading and return fallback.
+    C_Item.RequestLoadItemDataByName(itemName)
+
+    -- Fallback: use raw bracket text as itemLink, itemID=0 (unknown)
+    local fallbackLink = "|cffffffff|Hitem:0::::::::90:::::|h[" .. itemName .. "]|h|r"
+    return 0, fallbackLink
 end
 
 -- Find player class from raid roster by short name (without server suffix)
