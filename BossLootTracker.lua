@@ -333,7 +333,22 @@ end
 local function RecordLootItem(encounterID, recipient, itemID, itemLink, distributionMethod)
     if not encounterID or not recipient or not itemID then return false end
     local dedupKey = tostring(encounterID) .. "_" .. tostring(itemID) .. "_" .. recipient
-    if PendingLootItems[dedupKey] then return false end
+    if PendingLootItems[dedupKey] then
+        -- Already recorded by ENCOUNTER_LOOT_RECEIVED; update distributionMethod if CHAT_MSG_LOOT provides it
+        if distributionMethod and distributionMethod ~= DistributionMethods.UNKNOWN then
+            for i = #BLT.DB.lootRecords, 1, -1 do
+                local r = BLT.DB.lootRecords[i]
+                if r.encounterID == encounterID and r.itemID == itemID and r.playerName == recipient then
+                    r.distributionMethod = distributionMethod
+                    if BLT_DebugMode then
+                        print("|cffFFD700[BLT Debug]|r Updated distributionMethod for " .. recipient .. " -> " .. tostring(distributionMethod))
+                    end
+                    break
+                end
+            end
+        end
+        return false
+    end
     PendingLootItems[dedupKey] = true
 
     local classFile = FindPlayerClass(recipient)
