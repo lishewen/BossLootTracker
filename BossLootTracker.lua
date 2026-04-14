@@ -110,7 +110,7 @@ end
 -- Track encounter phase - set on ENCOUNTER_START, clear after all loot is distributed
 -- This ensures CurrentEncounter is available for CHAT_MSG_LOOT/SYSTEM processing
 local EncounterTimeout = nil
-local ENCOUNTER_TRACK_DURATION = 300 -- 5 minutes after boss kill to keep tracking loot
+local ENCOUNTER_TRACK_DURATION = 600 -- 10 minutes after boss kill to keep tracking loot (Roll can be slow)
 
 -- Handle encounter end - don't clear immediately, loot happens after
 local function OnEncounterEnd(event, encounterID, encounterName, difficultyID, groupSize)
@@ -193,9 +193,18 @@ local function OnEncounterLootReceived(event, encounterID, itemID, itemLink, qua
         return
     end
 
-    -- Filter by item class - only record equipment and crafting reagents
-    -- Skip consumables, quest items, containers, trade goods (non-reagent), misc
-    local _, _, _, _, _, _, _, _, itemEquipLoc, _, _, itemClassID, itemSubClassID = GetItemInfo(itemID)
+    -- Filter by item quality - only record Uncommon (green) and above
+    -- This skips gray (trash), white (common materials like 残渣/赛猪肉), etc.
+    local _, _, itemRarity, _, _, _, _, _, itemEquipLoc, _, _, itemClassID, itemSubClassID = GetItemInfo(itemID)
+    if itemRarity then
+        if itemRarity < 2 then  -- 0=Poor(gray), 1=Common(white) → skip
+            if BLT_DebugMode then
+                print("|cffFFD700[BLT Debug]|r Filtered quality=" .. itemRarity .. " item=" .. tostring(itemID))
+            end
+            return
+        end
+    end
+    -- Also filter by item class - skip consumables, quest items
     if itemClassID then
         if itemClassID == 3 or itemClassID == 4 or itemClassID == 8 then
             if BLT_DebugMode then
@@ -277,6 +286,8 @@ end
 -- Returns: itemID (number or nil), itemLink (string or nil)
 local function ParseLootBracket(text)
     local bracketContent = text:match("%[(.+)%]") or text
+    -- Extract itemID from the beginning of bracket (before the first dash)
+    local bracketItemID = tonumber(bracketContent:match("^(%d+)%-"))
     -- Item name is after the last colon inside brackets
     local itemName = bracketContent:match(":([^%]:]+)$")
     if not itemName then
@@ -285,19 +296,22 @@ local function ParseLootBracket(text)
     itemName = itemName:gsub("[%s%]]+$", ""):gsub("^%s+", "")
     if not itemName or itemName == "" then return nil, nil end
 
+    -- Try to get full item link from client cache
     local giiName, giiLink = GetItemInfo(itemName)
     if giiLink then
         local id = giiLink:match("item:(%d+)")
         if id then return tonumber(id), giiLink end
     end
 
-    -- GetItemInfo may return nil if item not cached yet.
-    -- Register for item data loading and return fallback.
+    -- Item not in cache yet — request it, but DON'T fall back to itemID=0
+    -- Use the itemID parsed from the bracket text itself (e.g. 276 from [276-锁甲头:xxx])
     C_Item.RequestLoadItemDataByName(itemName)
 
-    -- Fallback: use raw bracket text as itemLink, itemID=0 (unknown)
-    local fallbackLink = "|cffffffff|Hitem:0::::::::90:::::|h[" .. itemName .. "]|h|r"
-    return 0, fallbackLink
+    -- Fallback: use the bracket-extracted itemID and the original bracket text as the display link
+    -- This ensures the record is never lost just because the client cache is cold
+    local finalItemID = bracketItemID or 0
+    local fallbackLink = "|cffffff00|Hitem:" .. finalItemID .. "::::::::90:::::|h[" .. itemName .. "]|h|r"
+    return finalItemID, fallbackLink
 end
 
 -- Find player class from raid roster by short name (without server suffix)
