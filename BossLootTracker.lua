@@ -203,6 +203,19 @@ local function OnEncounterLootReceived(event, encounterID, itemID, itemLink, qua
             end
             return
         end
+    else
+        -- GetItemInfo not cached yet — fallback to itemLink quality code
+        if itemLink then
+            local linkQuality = GetQualityFromItemLink(itemLink)
+            if linkQuality and linkQuality < 2 then
+                if BLT_DebugMode then
+                    print("|cffFFD700[BLT Debug]|r Filtered (link) quality=" .. linkQuality .. " item=" .. tostring(itemID))
+                end
+                return
+            end
+        end
+        -- If both GetItemInfo and itemLink parsing fail, still record
+        -- (RecordLootItem has a secondary filter as last resort)
     end
     -- Also filter by item class - skip consumables, quest items
     if itemClassID then
@@ -330,8 +343,28 @@ local function FindPlayerClass(searchName)
 end
 
 -- Record a loot item with dedup check. Returns true if recorded.
+-- Extract item quality from itemLink's |cnIQx: prefix (works even when GetItemInfo is not cached)
+-- Returns: quality number (0-7), or nil if not parseable
+local function GetQualityFromItemLink(itemLink)
+    if not itemLink or type(itemLink) ~= "string" then return nil end
+    local qualityStr = itemLink:match("|cnIQ(%d+):")
+    if qualityStr then return tonumber(qualityStr) end
+    return nil
+end
+
 local function RecordLootItem(encounterID, recipient, itemID, itemLink, distributionMethod)
     if not encounterID or not recipient or not itemID then return false end
+
+    -- Secondary quality filter: check itemLink quality code as fallback when GetItemInfo was nil
+    if itemLink then
+        local quality = GetQualityFromItemLink(itemLink)
+        if quality and quality < 2 then
+            if BLT_DebugMode then
+                print("|cffFFD700[BLT Debug]|r RecordLootItem filtered quality=" .. quality .. " item=" .. tostring(itemID))
+            end
+            return false
+        end
+    end
     local dedupKey = tostring(encounterID) .. "_" .. tostring(itemID) .. "_" .. recipient
     if PendingLootItems[dedupKey] then
         -- Already recorded by ENCOUNTER_LOOT_RECEIVED; update distributionMethod if CHAT_MSG_LOOT provides it
