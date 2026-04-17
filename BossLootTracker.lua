@@ -33,6 +33,7 @@ local DistributionMethods = {
     NEED = "需求",
     GREED = "贪婪",
     TRANSMOG = "幻化",
+    PERSONAL = "个人拾取",
     UNKNOWN = "未知"
 }
 
@@ -171,6 +172,16 @@ local function OnEncounterStart(event, encounterID, encounterName, difficultyID,
     end
 end
 
+-- Extract item quality from itemLink's |cnIQx: prefix (works even when GetItemInfo is not cached)
+-- Returns: quality number (0-7), or nil if not parseable
+-- NOTE: 必须在使用此函数的所有调用者之前定义（Lua 5.1 的 local function 不会被前向声明）
+local function GetQualityFromItemLink(itemLink)
+    if not itemLink or type(itemLink) ~= "string" then return nil end
+    local qualityStr = itemLink:match("|cnIQ(%d+):")
+    if qualityStr then return tonumber(qualityStr) end
+    return nil
+end
+
 -- Handle encounter loot received event
 -- NOTE: ENCOUNTER_LOOT_RECEIVED fires ONCE per item drop
 -- Event params: encounterID, itemID, itemLink, quantity, playerName, classFileName
@@ -214,8 +225,12 @@ local function OnEncounterLootReceived(event, encounterID, itemID, itemLink, qua
                 return
             end
         end
-        -- If both GetItemInfo and itemLink parsing fail, still record
-        -- (RecordLootItem has a secondary filter as last resort)
+        -- If both GetItemInfo and itemLink parsing fail, skip the item entirely
+        -- Boss loot quality >= 2 is expected; recording unknown-quality items just pollutes the database
+        if BLT_DebugMode then
+            print("|cffFFD700[BLT Debug]|r Skipped item with undetermined quality: itemID=" .. tostring(itemID))
+        end
+        return
     end
     -- Also filter by item class - skip consumables, quest items
     if itemClassID then
@@ -268,6 +283,13 @@ local function OnEncounterLootReceived(event, encounterID, itemID, itemLink, qua
         qty = 1
     end
 
+    -- Determine distribution method based on current loot method
+    local distributionMethod = DistributionMethods.UNKNOWN
+    local lootMethod = GetLootMethod()
+    if lootMethod == "personalloot" then
+        distributionMethod = DistributionMethods.PERSONAL
+    end
+
     -- Dedup: mark this item as recorded
     local dedupKey = tostring(encounterID) .. "_" .. tostring(itemID) .. "_" .. playerName
     PendingLootItems[dedupKey] = true
@@ -284,7 +306,7 @@ local function OnEncounterLootReceived(event, encounterID, itemID, itemLink, qua
         quantity = qty,
         playerName = playerName,
         classFileName = classFile,
-        distributionMethod = DistributionMethods.UNKNOWN
+        distributionMethod = distributionMethod
     }
 
     table.insert(BLT.DB.lootRecords, record)
@@ -343,15 +365,6 @@ local function FindPlayerClass(searchName)
 end
 
 -- Record a loot item with dedup check. Returns true if recorded.
--- Extract item quality from itemLink's |cnIQx: prefix (works even when GetItemInfo is not cached)
--- Returns: quality number (0-7), or nil if not parseable
-local function GetQualityFromItemLink(itemLink)
-    if not itemLink or type(itemLink) ~= "string" then return nil end
-    local qualityStr = itemLink:match("|cnIQ(%d+):")
-    if qualityStr then return tonumber(qualityStr) end
-    return nil
-end
-
 local function RecordLootItem(encounterID, recipient, itemID, itemLink, distributionMethod)
     if not encounterID or not recipient or not itemID then return false end
 
