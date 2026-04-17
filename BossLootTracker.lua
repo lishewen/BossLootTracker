@@ -34,6 +34,7 @@ local DistributionMethods = {
     GREED = "贪婪",
     TRANSMOG = "幻化",
     PERSONAL = "个人拾取",
+    BOSS_DROP = "Boss掉落",
     UNKNOWN = "未知"
 }
 
@@ -276,6 +277,10 @@ local function OnEncounterLootReceived(event, encounterID, itemID, itemLink, qua
     local cleanItemLink = itemLink
     if not itemLink then
         cleanItemLink = "item:" .. tostring(itemID)
+    else
+        -- 清洗 itemLink 末尾可能附带的标点符号（中文句号、英文句号、逗号等）
+        -- 这些标点来自聊天消息解析时误带的消息结尾字符
+        cleanItemLink = itemLink:gsub("[。.,，]+$", "")
     end
 
     local qty = quantity or 1
@@ -283,12 +288,10 @@ local function OnEncounterLootReceived(event, encounterID, itemID, itemLink, qua
         qty = 1
     end
 
-    -- Determine distribution method based on current loot method
-    local distributionMethod = DistributionMethods.UNKNOWN
-    local lootMethod = GetLootMethod()
-    if lootMethod == "personalloot" then
-        distributionMethod = DistributionMethods.PERSONAL
-    end
+    -- Boss 战利品（encounterID > 0）直接标记为 Boss掉落
+    -- GetLootMethod() 在 ENCOUNTER_LOOT_RECEIVED 触发时不可靠，
+    -- 因为事件时机是 Boss 死后自动分配，此时 API 返回值可能为 nil 或不准确
+    local distributionMethod = DistributionMethods.BOSS_DROP
 
     -- Dedup: mark this item as recorded
     local dedupKey = tostring(encounterID) .. "_" .. tostring(itemID) .. "_" .. playerName
@@ -367,6 +370,11 @@ end
 -- Record a loot item with dedup check. Returns true if recorded.
 local function RecordLootItem(encounterID, recipient, itemID, itemLink, distributionMethod)
     if not encounterID or not recipient or not itemID then return false end
+
+    -- 清洗 itemLink 末尾可能附带的标点符号
+    if itemLink then
+        itemLink = itemLink:gsub("[。.,，]+$", "")
+    end
 
     -- Secondary quality filter: check itemLink quality code as fallback when GetItemInfo was nil
     if itemLink then

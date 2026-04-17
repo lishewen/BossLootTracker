@@ -2,7 +2,7 @@
 ## Title: BossLootTracker
 ## Notes-zhCN: 自动记录团队副本BOSS战利品掉落
 ## Author: lishewen
-## Version: 2.0.3
+## Version: 2.0.4
 ## SavedVariables: BossLootTrackerDB
 ## X-License: MIT
 ## X-Category: Raid
