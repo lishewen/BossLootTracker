@@ -450,11 +450,11 @@ end
 --------------------------------------------------------------------------------
 
 -- Extract item info from new-format loot bracket like [256-锁甲手:无拘狂暴者的护手]
+-- 12.0.5 note: the number at the start is item LEVEL, not item ID!
+-- Format: [ilvl-type:ItemName] where type is armor slot/weapon type abbreviation
 -- Returns: itemID (number or nil), itemLink (string or nil)
 local function ParseLootBracket(text)
     local bracketContent = text:match("%[(.+)%]") or text
-    -- Extract itemID from the beginning of bracket (before the first dash)
-    local bracketItemID = tonumber(bracketContent:match("^(%d+)%-"))
     -- Item name is after the last colon inside brackets
     local itemName = bracketContent:match(":([^%]:]+)$")
     if not itemName then
@@ -463,22 +463,41 @@ local function ParseLootBracket(text)
     itemName = itemName:gsub("[%s%]]+$", ""):gsub("^%s+", "")
     if not itemName or itemName == "" then return nil, nil end
 
-    -- Try to get full item link from client cache
+    -- Try to get full item link and REAL itemID from client cache
     local giiName, giiLink = GetItemInfo(itemName)
     if giiLink then
         local id = giiLink:match("item:(%d+)")
         if id then return tonumber(id), giiLink end
     end
 
-    -- Item not in cache yet — request it, but DON'T fall back to itemID=0
-    -- Use the itemID parsed from the bracket text itself (e.g. 276 from [276-锁甲头:xxx])
+    -- Item not in cache yet — request it
     C_Item.RequestLoadItemDataByName(itemName)
 
-    -- Fallback: use the bracket-extracted itemID and the original bracket text as the display link
-    -- This ensures the record is never lost just because the client cache is cold
-    local finalItemID = bracketItemID or 0
-    local fallbackLink = "|cffffff00|Hitem:" .. finalItemID .. "::::::::90:::::|h[" .. itemName .. "]|h|r"
-    return finalItemID, fallbackLink
+    -- Wait and retry once (items from other players may need a moment to load)
+    C_Timer.After(0.5, function()
+        local _, retryLink = GetItemInfo(itemName)
+        if retryLink then
+            local retryID = retryLink:match("item:(%d+)")
+            if retryID then
+                -- Update the most recent record for this item name if it has a wrong ID
+                for i = #BLT.DB.lootRecords, 1, -1 do
+                    local r = BLT.DB.lootRecords[i]
+                    if r.itemLink and r.itemLink:find(itemName, 1, true) and (r.itemID or 0) < 10000 then
+                        r.itemID = tonumber(retryID)
+                        r.itemLink = retryLink
+                        if BLT_DebugMode then
+                            print("|cffFFD700[BLT Debug]|r Updated itemID to " .. retryID .. " for " .. itemName)
+                        end
+                        break
+                    end
+                end
+            end
+        end
+    end)
+
+    -- Fallback: we don't have the real itemID, use 0 and the name
+    -- DO NOT use the ilvl number as itemID
+    return 0, "|cffffff00|Hitem:0::::::::90:::::|h[" .. itemName .. "]|h|r"
 end
 
 -- Find player class from raid roster by short name (without server suffix)
@@ -531,8 +550,12 @@ local function RecordLootItem(encounterID, recipient, itemID, itemLink, distribu
         qualityUnconfirmed = true
     end
     -- 去掉recipient的服务器后缀，确保去重key一致
-    local shortRecipient = recipient:match("^(.-)%-") or recipient
+    local shortRecipient = recipient:match("^(.-)%-" ) or recipient
+    -- v2.1.2: When itemID is 0 (uncached), include itemLink in dedup key to prevent collisions
     local dedupKey = tostring(encounterID) .. "_" .. tostring(itemID) .. "_" .. shortRecipient
+    if itemID == 0 and itemLink then
+        dedupKey = tostring(encounterID) .. "_0_" .. (itemLink:match("%[(.+)%]") or "") .. "_" .. shortRecipient
+    end
 
     -- Bug 1 修复：二次去重——检查 lootRecords 中是否已有相同记录（5秒内）
     local now = time()
