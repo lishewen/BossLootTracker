@@ -799,11 +799,9 @@ EventFrame:SetScript("OnEvent", function(self, event, ...)
         local encounterID, encounterName, difficultyID, groupSize = ...
         OnEncounterEnd(event, encounterID, encounterName, difficultyID, groupSize)
     elseif event == "ENCOUNTER_LOOT_RECEIVED" then
-        -- v2.1.0: pcall wrap to protect against 12.0.5 secret value errors
-        local ok, err = pcall(function()
-            local encounterID, itemID, itemLink, quantity, playerName, classFileName = ...
-            OnEncounterLootReceived(event, encounterID, itemID, itemLink, quantity, playerName, classFileName)
-        end)
+        -- v2.1.0: capture args first (Lua 5.1 anonymous functions can't use ...)
+        local elr_encounterID, elr_itemID, elr_itemLink, elr_quantity, elr_playerName, elr_classFileName = ...
+        local ok, err = pcall(OnEncounterLootReceived, event, elr_encounterID, elr_itemID, elr_itemLink, elr_quantity, elr_playerName, elr_classFileName)
         if not ok and BLT_DebugMode then
             print("|cffFFD700[BLT Debug]|r ENCOUNTER_LOOT_RECEIVED error: " .. tostring(err))
         end
