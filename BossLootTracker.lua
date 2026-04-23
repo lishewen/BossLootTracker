@@ -55,6 +55,31 @@ local IsRaidLootOpen = false  -- 标记当前是否在团本拾取状态
 -- Debug mode flag
 local BLT_DebugMode = false
 
+-- v2.1.1: Item blacklist — items that appear via ENCOUNTER_LOOT_RECEIVED but are NOT actual boss drops
+-- These include timewalking bonus items, currencies, and old expansion transmog rewards
+local BlacklistedItemIDs = {
+    [143776] = true,  -- 朦胧的时空扭曲硬币 (Timewalking currency)
+    [208115] = true,  -- 量子法杖 (Timewalking transmog weapon)
+    [208109] = true,  -- 量子之剑 (Timewalking transmog weapon)
+}
+
+-- v2.1.1: Valid raid difficulty IDs — only record drops from actual raid instances
+-- World bosses, timewalking, and other non-raid sources should be excluded
+local ValidRaidDifficulties = {
+    [2] = true,   -- Heroic (legacy raid)
+    [3] = true,   -- Mythic (legacy raid)
+    [14] = true,  -- Normal (modern raid)
+    [15] = true,  -- Heroic (modern raid)
+    [16] = true,  -- Mythic (modern raid)
+    [17] = true,  -- LFR (modern raid)
+}
+
+-- v2.1.1: Check if difficulty is from a valid raid (not world boss, not timewalking)
+local function IsValidRaidDifficulty(difficultyID)
+    if not difficultyID or type(difficultyID) ~= "number" then return false end
+    return ValidRaidDifficulties[difficultyID] or false
+end
+
 -- Initialize database
 local function InitializeDB()
     if not BossLootTrackerDB then
@@ -229,6 +254,23 @@ local function OnEncounterLootReceived(event, encounterID, itemID, itemLink, qua
     -- encounterID == 0 means the loot came from mining, rare elites, or other non-boss sources
     -- Only record loot from actual boss encounters (encounterID > 0)
     if encounterID == 0 then
+        return
+    end
+
+    -- v2.1.1: Blacklist known non-boss-drop items (timewalking currencies, transmog weapons, etc.)
+    if BlacklistedItemIDs[itemID] then
+        if BLT_DebugMode then
+            print("|cffFFD700[BLT Debug]|r Filtered blacklisted item: " .. tostring(itemID))
+        end
+        return
+    end
+
+    -- v2.1.1: Validate raid difficulty — skip world bosses (0), timewalking (24), etc.
+    local _, currentDiff = GetRaidInstanceInfo()
+    if currentDiff and not IsValidRaidDifficulty(currentDiff) then
+        if BLT_DebugMode then
+            print("|cffFFD700[BLT Debug]|r Filtered non-raid difficulty: " .. tostring(currentDiff))
+        end
         return
     end
 
