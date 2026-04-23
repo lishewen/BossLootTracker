@@ -471,9 +471,10 @@ function UI.GetUniquePlayers()
     local seen = {}
 
     for _, record in ipairs(BLT.DB.lootRecords) do
-        if not seen[record.playerName] then
-            table.insert(players, record.playerName)
-            seen[record.playerName] = true
+        local name = record.playerName
+        if name and not seen[name] then
+            table.insert(players, name)
+            seen[name] = true
         end
     end
 
