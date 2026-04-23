@@ -437,9 +437,10 @@ function UI.GetUniqueRaids()
     local seen = {}
 
     for _, record in ipairs(BLT.DB.lootRecords) do
-        if not seen[record.raidName] then
-            table.insert(raids, record.raidName)
-            seen[record.raidName] = true
+        local name = record.raidName
+        if name and not seen[name] then
+            table.insert(raids, name)
+            seen[name] = true
         end
     end
 
@@ -453,9 +454,10 @@ function UI.GetUniqueBosses()
     local seen = {}
 
     for _, record in ipairs(BLT.DB.lootRecords) do
-        if not seen[record.bossName] then
-            table.insert(bosses, record.bossName)
-            seen[record.bossName] = true
+        local name = record.bossName
+        if name and not seen[name] then
+            table.insert(bosses, name)
+            seen[name] = true
         end
     end
 
