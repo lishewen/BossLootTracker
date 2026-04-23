@@ -1,5 +1,5 @@
 -- BossLootTracker - Main Logic and Event Handlers
--- WoW for version 12.0.1 (Midnight)
+-- WoW for version 12.0.5 (Midnight)
 -- Author: lishewen
 -- License: MIT
 -- https://github.com/lishewen/BossLootTracker
@@ -183,11 +183,38 @@ local function GetQualityFromItemLink(itemLink)
     return nil
 end
 
+-- v2.1.0: Safe wrapper for GetItemInfo to handle 12.0.5 potential secret value returns
+-- Returns the same values as GetItemInfo, but protects against type errors
+local function SafeGetItemInfo(itemID)
+    if not itemID or type(itemID) ~= "number" then return nil end
+    local ok, result = pcall(GetItemInfo, itemID)
+    if not ok then return nil end
+    return result
+end
+
 -- Handle encounter loot received event
 -- NOTE: ENCOUNTER_LOOT_RECEIVED fires ONCE per item drop
 -- Event params: encounterID, itemID, itemLink, quantity, playerName, classFileName
 -- NO encounterName or lootMethod in this event!
+-- v2.1.0: Added pcall wrap for 12.0.5 secret value protection
 local function OnEncounterLootReceived(event, encounterID, itemID, itemLink, quantity, playerName, classFileName)
+    -- v2.1.0: Validate param types — 12.0.5 may inject secret values that aren't expected types
+    if type(encounterID) ~= "number" or type(itemID) ~= "number" then
+        if BLT_DebugMode then
+            print("|cffFFD700[BLT Debug]|r ENCOUNTER_LOOT_RECEIVED: invalid param types, enc=" .. type(encounterID) .. " item=" .. type(itemID))
+        end
+        return
+    end
+    -- v2.1.0: Protect against secret value strings in playerName/classFileName
+    if playerName ~= nil and type(playerName) ~= "string" then
+        playerName = tostring(playerName)
+    end
+    if classFileName ~= nil and type(classFileName) ~= "string" then
+        classFileName = "UNKNOWN"
+    end
+    if itemLink ~= nil and type(itemLink) ~= "string" then
+        itemLink = nil  -- Will be reconstructed from itemID
+    end
     -- Debug logging
     if BLT_DebugMode then
         print("|cffFFD700[BLT Debug]|r ENCOUNTER_LOOT_RECEIVED: enc=" .. tostring(encounterID) .. " item=" .. tostring(itemID) .. " player=" .. tostring(playerName))
@@ -205,11 +232,14 @@ local function OnEncounterLootReceived(event, encounterID, itemID, itemLink, qua
         return
     end
 
-    -- Filter by item quality - only record Uncommon (green) and above
-    -- This skips gray (trash), white (common materials like 残渣/赛猪肉), etc.
-    local _, _, itemRarity, _, _, _, _, _, itemEquipLoc, _, _, itemClassID, itemSubClassID = GetItemInfo(itemID)
+    -- Filter by item quality - only record Rare (blue) and above
+    -- This skips gray (trash), white (common materials), green (crafting materials like 锐锋犬齿/白银叶/充裕钢筋)
+    -- Boss装备至少蓝色品质，绿色品质全是材料/杂物
+    -- v2.0.7 修复：物品未缓存时宁可放行也不漏记，用 qualityUnconfirmed 标记
+    local _, _, itemRarity, _, _, _, _, _, itemEquipLoc, _, _, itemClassID, itemSubClassID = SafeGetItemInfo(itemID)
+    local qualityUnconfirmed = false
     if itemRarity then
-        if itemRarity < 2 then  -- 0=Poor(gray), 1=Common(white) → skip
+        if itemRarity < 3 then  -- 0=Poor(gray), 1=Common(white), 2=Uncommon(green materials) → skip
             if BLT_DebugMode then
                 print("|cffFFD700[BLT Debug]|r Filtered quality=" .. itemRarity .. " item=" .. tostring(itemID))
             end
@@ -219,32 +249,44 @@ local function OnEncounterLootReceived(event, encounterID, itemID, itemLink, qua
         -- GetItemInfo not cached yet — fallback to itemLink quality code
         if itemLink then
             local linkQuality = GetQualityFromItemLink(itemLink)
-            if linkQuality and linkQuality < 2 then
+            if linkQuality and linkQuality < 3 then
                 if BLT_DebugMode then
                     print("|cffFFD700[BLT Debug]|r Filtered (link) quality=" .. linkQuality .. " item=" .. tostring(itemID))
                 end
                 return
             end
         end
-        -- If both GetItemInfo and itemLink parsing fail, skip the item entirely
-        -- Boss loot quality >= 2 is expected; recording unknown-quality items just pollutes the database
+        -- v2.0.7 修复：物品未缓存且无法确定品质时，放行处理，标记 qualityUnconfirmed
+        -- 宁可多记一个可疑物品，也不能漏掉真正的新 Boss 装备掉落
+        qualityUnconfirmed = true
         if BLT_DebugMode then
-            print("|cffFFD700[BLT Debug]|r Skipped item with undetermined quality: itemID=" .. tostring(itemID))
+            print("|cffFFD700[BLT Debug]|r Item quality unconfirmed, allowing through: itemID=" .. tostring(itemID))
         end
-        return
     end
-    -- Also filter by item class - skip consumables, quest items
+    -- Also filter by item class - only keep Weapons(2) and Armor(4)
+    -- Bug 2 修复：只记录武器和护甲，排除通货/材料/图纸等非装备掉落
+    -- itemClassID 定义：0=消耗品, 1=容器, 2=武器, 3=宝石, 4=护甲, 5=试剂,
+    --                  6=投射物, 7=交易品, 8=任务物品, 9=杂项, ...
+    -- v2.0.7 修复：itemClassID 为 nil（未缓存）时不过滤，放行处理
     if itemClassID then
-        if itemClassID == 3 or itemClassID == 4 or itemClassID == 8 then
+        if itemClassID ~= 2 and itemClassID ~= 4 then
             if BLT_DebugMode then
-                print("|cffFFD700[BLT Debug]|r Filtered itemClassID=" .. itemClassID .. " item=" .. tostring(itemID))
+                print("|cffFFD700[BLT Debug]|r Filtered non-equip itemClassID=" .. itemClassID .. " item=" .. tostring(itemID))
             end
             return
         end
+    else
+        -- itemClassID 为 nil 说明物品未缓存，放行处理
+        qualityUnconfirmed = true
     end
 
     -- Validate playerName - must have a valid receiver
-    if not playerName or playerName == "" then
+    -- Bug 3 额外保护：过滤掉 "你"（系统消息自称，不是真实玩家名）
+    if not playerName or playerName == "" or playerName == "你" then
+        return
+    end
+    local shortPlayerName = playerName:match("^(.-)%-") or playerName
+    if shortPlayerName == "你" then
         return
     end
 
@@ -294,7 +336,25 @@ local function OnEncounterLootReceived(event, encounterID, itemID, itemLink, qua
     local distributionMethod = DistributionMethods.BOSS_DROP
 
     -- Dedup: mark this item as recorded
-    local dedupKey = tostring(encounterID) .. "_" .. tostring(itemID) .. "_" .. playerName
+    -- 去掉playerName的服务器后缀，确保与CHAT_MSG_LOOT的去重key一致
+    local dedupKey = tostring(encounterID) .. "_" .. tostring(itemID) .. "_" .. shortPlayerName
+
+    -- Bug 1 修复：二次去重——检查 lootRecords 中是否已有相同记录
+    -- WoW 的 ENCOUNTER_LOOT_RECEIVED 对同一物品可能触发两次（掉落时+拾取时）
+    local now = time()
+    for i = #BLT.DB.lootRecords, 1, -1 do
+        local r = BLT.DB.lootRecords[i]
+        if r.encounterID == encounterID and r.itemID == itemID then
+            local rShortName = r.playerName:match("^(.-)%-") or r.playerName
+            if rShortName == shortPlayerName and math.abs(r.timestamp - now) < 5 then
+                if BLT_DebugMode then
+                    print("|cffFFD700[BLT Debug]|r Dedup: skipped duplicate lootRecords entry for " .. shortPlayerName)
+                end
+                return
+            end
+        end
+    end
+
     PendingLootItems[dedupKey] = true
 
     local record = {
@@ -311,6 +371,9 @@ local function OnEncounterLootReceived(event, encounterID, itemID, itemLink, qua
         classFileName = classFile,
         distributionMethod = distributionMethod
     }
+    if qualityUnconfirmed then
+        record.qualityUnconfirmed = true
+    end
 
     table.insert(BLT.DB.lootRecords, record)
     print("|cff00FF00[BossLootTracker]|r 记录：" .. playerName .. " 获得了 " .. (cleanItemLink or "item:"..tostring(itemID)))
@@ -371,28 +434,66 @@ end
 local function RecordLootItem(encounterID, recipient, itemID, itemLink, distributionMethod)
     if not encounterID or not recipient or not itemID then return false end
 
+    -- Bug 3 额外保护：过滤掉 "你"（系统消息自称）
+    local shortRecipientCheck = recipient:match("^(.-)%-") or recipient
+    if shortRecipientCheck == "你" then return false end
+
     -- 清洗 itemLink 末尾可能附带的标点符号
     if itemLink then
         itemLink = itemLink:gsub("[。.,，]+$", "")
     end
 
-    -- Secondary quality filter: check itemLink quality code as fallback when GetItemInfo was nil
+    -- Secondary quality filter: only record Rare (blue) and above
+    -- v2.0.7 修复：物品未缓存时放行，标记 qualityUnconfirmed
+    local qualityUnconfirmed = false
     if itemLink then
         local quality = GetQualityFromItemLink(itemLink)
-        if quality and quality < 2 then
+        if quality and quality < 3 then
             if BLT_DebugMode then
                 print("|cffFFD700[BLT Debug]|r RecordLootItem filtered quality=" .. quality .. " item=" .. tostring(itemID))
             end
             return false
+        elseif not quality then
+            -- itemLink 中也没有品质信息，可能是未缓存物品，放行处理
+            qualityUnconfirmed = true
+            if BLT_DebugMode then
+                print("|cffFFD700[BLT Debug]|r RecordLootItem quality unconfirmed, allowing: itemID=" .. tostring(itemID))
+            end
+        end
+    else
+        -- 没有 itemLink，也无法判断品质，放行处理
+        qualityUnconfirmed = true
+    end
+    -- 去掉recipient的服务器后缀，确保去重key一致
+    local shortRecipient = recipient:match("^(.-)%-") or recipient
+    local dedupKey = tostring(encounterID) .. "_" .. tostring(itemID) .. "_" .. shortRecipient
+
+    -- Bug 1 修复：二次去重——检查 lootRecords 中是否已有相同记录（5秒内）
+    local now = time()
+    for i = #BLT.DB.lootRecords, 1, -1 do
+        local r = BLT.DB.lootRecords[i]
+        if r.encounterID == encounterID and r.itemID == itemID then
+            local rShortName = r.playerName:match("^(.-)%-") or r.playerName
+            if rShortName == shortRecipient and math.abs(r.timestamp - now) < 5 then
+                if BLT_DebugMode then
+                    print("|cffFFD700[BLT Debug]|r RecordLootItem dedup: skipped duplicate for " .. shortRecipient)
+                end
+                -- Still update distributionMethod if this entry provides a better one
+                if distributionMethod and distributionMethod ~= DistributionMethods.UNKNOWN then
+                    r.distributionMethod = distributionMethod
+                end
+                return false
+            end
         end
     end
-    local dedupKey = tostring(encounterID) .. "_" .. tostring(itemID) .. "_" .. recipient
+
     if PendingLootItems[dedupKey] then
         -- Already recorded by ENCOUNTER_LOOT_RECEIVED; update distributionMethod if CHAT_MSG_LOOT provides it
         if distributionMethod and distributionMethod ~= DistributionMethods.UNKNOWN then
             for i = #BLT.DB.lootRecords, 1, -1 do
                 local r = BLT.DB.lootRecords[i]
-                if r.encounterID == encounterID and r.itemID == itemID and r.playerName == recipient then
+                local rShortName = r.playerName:match("^(.-)%-") or r.playerName
+                if r.encounterID == encounterID and r.itemID == itemID and rShortName == shortRecipient then
                     r.distributionMethod = distributionMethod
                     if BLT_DebugMode then
                         print("|cffFFD700[BLT Debug]|r Updated distributionMethod for " .. recipient .. " -> " .. tostring(distributionMethod))
@@ -404,6 +505,11 @@ local function RecordLootItem(encounterID, recipient, itemID, itemLink, distribu
         return false
     end
     PendingLootItems[dedupKey] = true
+
+    -- 如果distributionMethod是UNKNOWN且当前在Boss战中，自动标记为Boss掉落
+    if distributionMethod == DistributionMethods.UNKNOWN and CurrentEncounter and CurrentEncounter.id == encounterID then
+        distributionMethod = DistributionMethods.BOSS_DROP
+    end
 
     local classFile = FindPlayerClass(recipient)
     local raidName, difficulty
@@ -429,6 +535,9 @@ local function RecordLootItem(encounterID, recipient, itemID, itemLink, distribu
         classFileName = classFile,
         distributionMethod = distributionMethod or DistributionMethods.UNKNOWN
     }
+    if qualityUnconfirmed then
+        record.qualityUnconfirmed = true
+    end
 
     table.insert(BLT.DB.lootRecords, record)
     print("|cff00FF00[BossLootTracker]|r 记录：" .. recipient .. " 获得了 " .. (itemLink or "item:"..tostring(itemID)))
@@ -499,6 +608,8 @@ local function OnChatMsgLoot(event, msg, ...)
     end
 
     -- If we found a valid item from new formats, record it
+    -- Bug 3 额外保护：过滤掉 "你"（系统消息自称）
+    if recipient and (recipient == "你" or recipient == "你 ") then return end
     if recipient and itemID and itemLink then
         RecordLootItem(CurrentEncounter.id, recipient, itemID, itemLink, distributionMethod)
         return
@@ -643,6 +754,9 @@ local function OnChatMsgSystem(event, msg, ...)
     recipient = recipient:match("^(.-)%-") or recipient
     recipient = recipient:gsub("%s+$", "")
 
+    -- Bug 3 额外保护：过滤掉 "你"
+    if recipient == "你" then return end
+
     RecordLootItem(CurrentEncounter.id, recipient, itemID, itemLink, distributionMethod)
 end
 
@@ -685,8 +799,14 @@ EventFrame:SetScript("OnEvent", function(self, event, ...)
         local encounterID, encounterName, difficultyID, groupSize = ...
         OnEncounterEnd(event, encounterID, encounterName, difficultyID, groupSize)
     elseif event == "ENCOUNTER_LOOT_RECEIVED" then
-        local encounterID, itemID, itemLink, quantity, playerName, classFileName = ...
-        OnEncounterLootReceived(event, encounterID, itemID, itemLink, quantity, playerName, classFileName)
+        -- v2.1.0: pcall wrap to protect against 12.0.5 secret value errors
+        local ok, err = pcall(function()
+            local encounterID, itemID, itemLink, quantity, playerName, classFileName = ...
+            OnEncounterLootReceived(event, encounterID, itemID, itemLink, quantity, playerName, classFileName)
+        end)
+        if not ok and BLT_DebugMode then
+            print("|cffFFD700[BLT Debug]|r ENCOUNTER_LOOT_RECEIVED error: " .. tostring(err))
+        end
     elseif event == "CHAT_MSG_LOOT" then
         OnChatMsgLoot(event, ...)
     elseif event == "LOOT_OPENED" then
