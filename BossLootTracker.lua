@@ -123,7 +123,6 @@ local function InitializeDB()
             BossLootTrackerDB.lootRecords = fixed
         end
     end
-    end
 
     -- Initialize settings if they don't exist
     if not BossLootTrackerDB.settings then
