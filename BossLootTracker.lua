@@ -100,6 +100,31 @@ local function InitializeDB()
         BossLootTrackerDB.lootRecords = {}
     end
 
+    -- v2.1.1: Fix corrupted data where lootRecords has nested array structure
+    -- (first element is itself an array of all records instead of a single record)
+    if #BossLootTrackerDB.lootRecords > 0 then
+        local first = BossLootTrackerDB.lootRecords[1]
+        if type(first) == "table" and first[1] and type(first[1]) == "table" and first[1].raidName then
+            -- First element is a nested array — flatten it
+            local fixed = {}
+            for _, inner in ipairs(BossLootTrackerDB.lootRecords) do
+                if type(inner) == "table" and inner[1] and type(inner[1]) == "table" then
+                    -- This is a nested group, extract each inner record
+                    for _, rec in ipairs(inner) do
+                        if type(rec) == "table" and rec.raidName then
+                            table.insert(fixed, rec)
+                        end
+                    end
+                elseif type(inner) == "table" and inner.raidName then
+                    -- This is a normal record
+                    table.insert(fixed, inner)
+                end
+            end
+            BossLootTrackerDB.lootRecords = fixed
+        end
+    end
+    end
+
     -- Initialize settings if they don't exist
     if not BossLootTrackerDB.settings then
         BossLootTrackerDB.settings = {
